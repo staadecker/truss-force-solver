@@ -2,6 +2,12 @@ import math
 from typing import Dict, Tuple, Set, Optional
 import tkinter
 
+"""Limitations in bridge:
+- One joint cannot have to beams going in the same direction.
+- All external forces are aligned horizontally
+- Uniformly distributed load
+"""
+
 
 def display_value(value):
     """Returns a formatted string for the value according to slide-rule precision."""
@@ -100,7 +106,7 @@ class Beam:
         self.joint2 = joint2
 
     def __eq__(self, other):
-        return (self.joint1 == other.joint1 and self.joint2 == other.joint2)\
+        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) \
                or (self.joint2 == other.joint1 and self.joint1 == other.joint2)
 
     def __hash__(self):
@@ -117,16 +123,15 @@ class Beam:
 
 
 class BridgeData:
-    def __init__(self, beams: Set[Beam], external_loads: Dict[Point, Vector],
-                 supports: Dict[Point, Set[Vector]]):
+    def __init__(self, beams: Set[Beam], load_per_unit_length, supports: Set[Point], height_of_deck):
         """
         :param beams: A dictionary where each joint is a key and each joint points to a set of joints that is connected to the starting joint
-        :param external_loads: A dictionary where joints map to the vector load at that joint
-        :param supports: A dictionary where joints map to a set of vectors representing reaction forces
+        :param supports: A set where with the joints where there's an upward support
         """
         self.supports = supports
         self.beams = beams
-        self.external_loads = external_loads
+        self.load_per_unit_length = load_per_unit_length
+        self.height_of_deck = height_of_deck
 
 
 class CalculatedBridge:
@@ -136,7 +141,9 @@ class CalculatedBridge:
         self.horizontal_span: Optional[Tuple[float, float]] = None
         self.member_forces: Dict[Beam, Optional[float]] = {}
         self.joints = {}
+        self.external_forces = {}
 
+    def build_joint_map(self):
         # Build up joints
         for beam in self.data.beams:
             self.member_forces[beam] = None
@@ -148,6 +155,40 @@ class CalculatedBridge:
 
             self.joints[beam.joint1].add(beam.joint2)
             self.joints[beam.joint2].add(beam.joint1)
+
+    def calculate_external_forces(self):
+        if self.joints == {}:
+            self.build_joint_map()
+
+        inline_joint_x_values = []
+        for joint in self.joints:
+            if joint.y != self.data.height_of_deck:
+                continue
+            inline_joint_x_values.append(joint.x)
+
+        inline_joint_x_values = sorted(inline_joint_x_values)
+
+        for index, x_value in enumerate(inline_joint_x_values):
+            if index == 0:
+                length_covered = (inline_joint_x_values[index + 1] - x_value) / 2
+            elif index < len(inline_joint_x_values) - 1:
+                length_covered = (inline_joint_x_values[index + 1] - inline_joint_x_values[index - 1]) / 2
+            else:
+                length_covered = (x_value - inline_joint_x_values[index - 1]) / 2
+            self.external_forces[Point(x_value, self.data.height_of_deck)] = Vector(0,
+                                                                                    -length_covered * self.data.load_per_unit_length)
+
+        sorted_support_x_values = sorted([support.x for support in self.data.supports])
+
+        for index, x_value in enumerate(sorted_support_x_values):
+            if index == 0:
+                length_covered = (sorted_support_x_values[index + 1] - x_value) / 2
+            elif index < len(sorted_support_x_values) - 1:
+                length_covered = (sorted_support_x_values[index + 1] - sorted_support_x_values[index - 1]) / 2
+            else:
+                length_covered = (x_value - sorted_support_x_values[index - 1]) / 2
+            self.external_forces[Point(x_value, self.data.height_of_deck)] += Vector(0,
+                                                                                     length_covered * self.data.load_per_unit_length)
 
     def get_vertical_span(self):
         if self.vertical_span is not None:
@@ -176,6 +217,12 @@ class CalculatedBridge:
         return self.horizontal_span
 
     def calculate_member_forces(self):
+        if len(self.joints) == 0:
+            self.build_joint_map()
+
+        if len(self.external_forces) == 0:
+            self.calculate_external_forces()
+
         # Loop through every joint repeatedly.
         # At each joint look for member forces + external forces + joint load
         # In each component, verify if there's only one unknown_opposing_joints. Repeat in other component if solved
@@ -190,7 +237,7 @@ class CalculatedBridge:
                 sum_of_forces = Vector(0, 0)
                 unknown_opposing_joints = []
 
-                # Get known forces
+                # Get forces in members
                 for opposing_joint in opposing_joints:
                     direction_vector = Vector.from_a_to_b(joint, opposing_joint)
                     member_force = self.member_forces[Beam(joint, opposing_joint)]
@@ -200,14 +247,9 @@ class CalculatedBridge:
                     else:
                         sum_of_forces += direction_vector.get_unit_vector() * member_force
 
-                # Get loads
-                if joint in self.data.external_loads:
-                    sum_of_forces += self.data.external_loads[joint]
-
-                # Get support forces
-                if joint in self.data.supports:
-                    for force in self.data.supports[joint]:
-                        sum_of_forces += force
+                # Get external forces
+                if joint in self.external_forces:
+                    sum_of_forces += self.external_forces[joint]
 
                 if len(unknown_opposing_joints) > 3:
                     continue
@@ -223,7 +265,7 @@ class CalculatedBridge:
                     unknown_opposing_joint = unknown_opposing_joints[0]
                     direction_vector = Vector.from_a_to_b(joint, unknown_opposing_joint)
 
-                    if sum_of_forces == Vector(0,0):
+                    if sum_of_forces == Vector(0, 0):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = 0
                     elif sum_of_forces.is_collinear(direction_vector):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.sign_difference(
@@ -293,8 +335,6 @@ class BridgeFactory:
         beams = set()
         side_length = span / number_of_triangles
         height = side_length * math.sqrt(3) / 2
-        load_per_joint = Vector(0, -load_per_unit_length * side_length)
-        external_loads = {}
 
         previous_top_corner = None
 
@@ -311,14 +351,14 @@ class BridgeFactory:
             if previous_top_corner is not None:
                 beams.add(Beam(previous_top_corner, top_corner))
 
-            if i != 0:
-                external_loads[left_corner] = load_per_joint
-
             previous_top_corner = top_corner
 
-        upward_support = Vector(0, 1) * load_per_joint.get_magnitude() * (number_of_triangles - 1) / 2
-        return BridgeData(beams, external_loads,
-                          {Point(0, 0): {upward_support}, Point(span, 0): {upward_support}})
+        return BridgeData(beams, load_per_unit_length, {Point(0, 0), Point(span, 0)}, 0)
+
+    @staticmethod
+    def add_supports_to_bridge(bridge: BridgeData, supports: Set[Point]):
+        for support in supports:
+            bridge.supports.add(support)
 
 
 class BridgeGUI:
@@ -364,11 +404,7 @@ class BridgeGUI:
                                      width=horizontal_span_distance * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING)
 
     def draw_external_forces(self, bridge: CalculatedBridge):
-        for joint, support in bridge.data.supports.items():
-            for reaction in support:
-                self.draw_vector(reaction, joint)
-
-        for joint, force in bridge.data.external_loads.items():
+        for joint, force in bridge.external_forces.items():
             self.draw_vector(force, joint)
 
     def display(self):
@@ -404,7 +440,7 @@ class BridgeGUI:
 
 
 if __name__ == "__main__":
-    myBridge = BridgeFactory.build_equilateral_bridge(5, 40, 2)
+    myBridge = BridgeFactory.build_equilateral_bridge(4, 40, 1)
     calculatedBridge = CalculatedBridge(myBridge)
     calculatedBridge.calculate_member_forces()
     GUI = BridgeGUI()
