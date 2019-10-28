@@ -4,7 +4,20 @@ import tkinter
 
 
 def display_value(value):
-    return str(round(value, 2))
+    """Returns a formatted string for the value according to slide-rule precision."""
+    if value == 0:
+        return "0.00"
+    string_value = str(value)
+    for index, char in enumerate(string_value):
+        if char in ("0", ".", "-"):
+            continue
+
+        target = index + 3
+        if char == "1":
+            target += 1
+        if string_value[:target].find(".") != -1:
+            target += 1
+        return string_value[:target]
 
 
 class Vector:
@@ -72,18 +85,23 @@ class Vector:
         return Vector(self.x - other.x, self.y - other.y)
 
 
+class Point(Vector):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+
+
 class Beam:
     """
     A pair of points that represents a beam with the special property that the order of the pair does not matter
     """
 
-    def __init__(self, joint1: Vector, joint2: Vector):
+    def __init__(self, joint1: Point, joint2: Point):
         self.joint1 = joint1
         self.joint2 = joint2
 
     def __eq__(self, other):
-        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) or (
-                self.joint2 == other.joint1 and self.joint1 == other.joint2)
+        return (self.joint1 == other.joint1 and self.joint2 == other.joint2)\
+               or (self.joint2 == other.joint1 and self.joint1 == other.joint2)
 
     def __hash__(self):
         return hash(self.joint1) + hash(self.joint2)
@@ -94,20 +112,20 @@ class Beam:
     def __repr__(self):
         return self.__str__()
 
-
-Beams = Dict[Vector, Set[Vector]]
+    def get_direction_vector(self) -> Vector:
+        return Vector.from_a_to_b(self.joint1, self.joint2)
 
 
 class BridgeData:
-    def __init__(self, beams: Beams, external_loads: Dict[Vector, Vector],
-                 supports: Dict[Vector, Set[Vector]]):
+    def __init__(self, beams: Set[Beam], external_loads: Dict[Point, Vector],
+                 supports: Dict[Point, Set[Vector]]):
         """
         :param beams: A dictionary where each joint is a key and each joint points to a set of joints that is connected to the starting joint
         :param external_loads: A dictionary where joints map to the vector load at that joint
         :param supports: A dictionary where joints map to a set of vectors representing reaction forces
         """
         self.supports = supports
-        self.joints = beams
+        self.beams = beams
         self.external_loads = external_loads
 
 
@@ -117,10 +135,19 @@ class CalculatedBridge:
         self.vertical_span: Optional[Tuple[float, float]] = None
         self.horizontal_span: Optional[Tuple[float, float]] = None
         self.member_forces: Dict[Beam, Optional[float]] = {}
+        self.joints = {}
 
-        for joint, opposite_joints in self.data.joints.items():
-            for opposite_joint in opposite_joints:
-                self.member_forces[Beam(joint, opposite_joint)] = None
+        # Build up joints
+        for beam in self.data.beams:
+            self.member_forces[beam] = None
+            if beam.joint1 not in self.joints:
+                self.joints[beam.joint1] = set()
+
+            if beam.joint2 not in self.joints:
+                self.joints[beam.joint2] = set()
+
+            self.joints[beam.joint1].add(beam.joint2)
+            self.joints[beam.joint2].add(beam.joint1)
 
     def get_vertical_span(self):
         if self.vertical_span is not None:
@@ -128,7 +155,7 @@ class CalculatedBridge:
 
         min_value = None
         max_value = None
-        for joint in self.data.joints.keys():
+        for joint in self.joints.keys():
             min_value = min(joint.y, min_value) if min_value is not None else joint.y
             max_value = max(joint.y, max_value) if max_value is not None else joint.y
 
@@ -141,7 +168,7 @@ class CalculatedBridge:
 
         min_value = None
         max_value = None
-        for joint in self.data.joints.keys():
+        for joint in self.joints.keys():
             min_value = min(joint.x, min_value) if min_value is not None else joint.x
             max_value = max(joint.x, max_value) if max_value is not None else joint.x
 
@@ -155,8 +182,8 @@ class CalculatedBridge:
         # Repeat for other joints
         passes = 0
         calculated_joints = set()
-        while passes < len(self.data.joints) * 2 and len(calculated_joints) < len(self.data.joints):
-            for joint, opposing_joints in self.data.joints.items():
+        while passes < len(self.joints) * 2 and len(calculated_joints) < len(self.joints):
+            for joint, opposing_joints in self.joints.items():
                 if joint in calculated_joints:
                     continue
 
@@ -196,7 +223,9 @@ class CalculatedBridge:
                     unknown_opposing_joint = unknown_opposing_joints[0]
                     direction_vector = Vector.from_a_to_b(joint, unknown_opposing_joint)
 
-                    if sum_of_forces.is_collinear(direction_vector):
+                    if sum_of_forces == Vector(0,0):
+                        self.member_forces[Beam(unknown_opposing_joint, joint)] = 0
+                    elif sum_of_forces.is_collinear(direction_vector):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.sign_difference(
                             direction_vector) * -1 * sum_of_forces.get_magnitude()
                     else:
@@ -261,7 +290,7 @@ class CalculatedBridge:
 class BridgeFactory:
     @staticmethod
     def build_equilateral_bridge(number_of_triangles: int, span: float, load_per_unit_length: float):
-        beams: Beams = {}
+        beams = set()
         side_length = span / number_of_triangles
         height = side_length * math.sqrt(3) / 2
         load_per_joint = Vector(0, -load_per_unit_length * side_length)
@@ -271,23 +300,16 @@ class BridgeFactory:
 
         for i in range(number_of_triangles):
             # Corners
-            left_corner = Vector(i * side_length, 0)
-            top_corner = Vector((i + 0.5) * side_length, height)
-            right_corner = Vector((i + 1) * side_length, 0)
+            left_corner = Point(i * side_length, 0)
+            top_corner = Point((i + 0.5) * side_length, height)
+            right_corner = Point((i + 1) * side_length, 0)
 
-            # Add joints
-            beams[left_corner] = set() if left_corner not in beams else beams[left_corner]
-            beams[right_corner] = set() if right_corner not in beams else beams[right_corner]
-            beams[top_corner] = set() if top_corner not in beams else beams[top_corner]
-
-            # Connect joints
-            beams[left_corner].update([top_corner, right_corner])
-            beams[right_corner].update([left_corner, top_corner])
-            beams[top_corner].update([left_corner, right_corner])
+            beams.add(Beam(left_corner, right_corner))
+            beams.add(Beam(left_corner, top_corner))
+            beams.add(Beam(right_corner, top_corner))
 
             if previous_top_corner is not None:
-                beams[previous_top_corner].add(top_corner)
-                beams[top_corner].add(previous_top_corner)
+                beams.add(Beam(previous_top_corner, top_corner))
 
             if i != 0:
                 external_loads[left_corner] = load_per_joint
@@ -296,7 +318,7 @@ class BridgeFactory:
 
         upward_support = Vector(0, 1) * load_per_joint.get_magnitude() * (number_of_triangles - 1) / 2
         return BridgeData(beams, external_loads,
-                          {Vector(0, 0): {upward_support}, Vector(span, 0): {upward_support}})
+                          {Point(0, 0): {upward_support}, Point(span, 0): {upward_support}})
 
 
 class BridgeGUI:
@@ -382,7 +404,7 @@ class BridgeGUI:
 
 
 if __name__ == "__main__":
-    myBridge = BridgeFactory.build_equilateral_bridge(4, 40, 2)
+    myBridge = BridgeFactory.build_equilateral_bridge(5, 40, 2)
     calculatedBridge = CalculatedBridge(myBridge)
     calculatedBridge.calculate_member_forces()
     GUI = BridgeGUI()
