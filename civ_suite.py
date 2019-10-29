@@ -8,43 +8,70 @@ import tkinter
 - Uniformly distributed load
 """
 
+NUMBER_OF_SIGNIFICANT_DIGITS = 3
+TOLERANCE = 10 ** -8  # Used when checking if values are equal
 
-def display_value(value):
+
+def values_are_equal(value_1: float, value_2: float) -> bool:
+    return value_1 - TOLERANCE <= value_2 <= value_1 + TOLERANCE
+
+
+def display_value(value: float) -> str:
     """Returns a formatted string for the value according to slide-rule precision."""
-    if value == 0:
+    if values_are_equal(0, value):
         return "0.00"
-    string_value = str(value)
-    for index, char in enumerate(string_value):
-        if char in ("0", ".", "-"):
-            continue
+    number_of_digits = NUMBER_OF_SIGNIFICANT_DIGITS - int(math.floor(math.log10(abs(value)))) - 1
 
-        target = index + 3
-        if char == "1":
-            target += 1
-        if string_value[:target].find(".") != -1:
-            target += 1
-        return string_value[:target]
+    # If decimals are dropped, convert to int
+    if number_of_digits <= 0:
+        return str(int(round(value, 0)))
+
+    return str(round(value, number_of_digits))
 
 
-class Vector:
-    TOLERANCE = 10 ** -6
-
-    def __init__(self, x: float, y: float):
+class PairOfValues:
+    def __init__(self, x, y):
         self.x = x
         self.y = y
 
-    @staticmethod
-    def build_from_direction(magnitude: float, direction: float):
+    def __str__(self):
+        return f"({self.x}, {self.y})"
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+    def __eq__(self, other):
+        return values_are_equal(self.x, other.x) and values_are_equal(self.y, other.y)
+
+
+class Point(PairOfValues):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+
+
+class Vector(PairOfValues):
+    def __init__(self, x: float, y: float):
+        super().__init__(x, y)
+
+    @classmethod
+    def from_direction(cls, magnitude: float, radians: float):
         """
         :param magnitude: Number of radians from the positive x axis
-        :param direction:
+        :param radians:
         :return: The vector
         """
-        return Vector(magnitude * math.cos(direction), magnitude * math.sin(direction))
+        return Vector(magnitude * math.cos(radians), magnitude * math.sin(radians))
 
     @staticmethod
-    def from_a_to_b(a, b):
-        return b - a
+    def from_a_to_b(a: Point, b: Point):
+        return Vector(b.x - a.x, b.y - a.y)
+
+    @staticmethod
+    def from_point(point: Point):
+        return Vector(point.x, point.y)
 
     def get_unit_vector(self):
         return self / self.get_magnitude()
@@ -52,18 +79,17 @@ class Vector:
     def get_magnitude(self):
         return math.sqrt(self.x ** 2 + self.y ** 2)
 
-    def is_collinear(self, other):
-        if other.x == 0 or self.x == 0:
-            if other.x == 0 and self.x == 0:
-                return True
-            return False
-        return other.y / other.x - Vector.TOLERANCE <= self.y / self.x <= other.y / other.x + Vector.TOLERANCE
+    def dot_product(self, other):
+        return self.x * other.x + self.y * other.y
 
-    def sign_difference(self, other):
+    def cos_theta(self, other):
         """
-        :return: 1 or -1 depending on if the vectors point in the same or opposite directions
+        :return: The result of cos theta where theta is the angle between the vectors
         """
-        return (self.x / other.x) / abs(self.x / other.x)
+        return self.dot_product(other) / (self.get_magnitude() * other.get_magnitude())
+
+    def is_collinear(self, other):
+        return values_are_equal(1, abs(self.cos_theta(other)))
 
     def __add__(self, other):
         return Vector(self.x + other.x, self.y + other.y)
@@ -74,26 +100,11 @@ class Vector:
     def __truediv__(self, other):
         return Vector(self.x / other, self.y / other)
 
-    def __hash__(self):
-        return hash((self.x, self.y))  # Double brackets for tuple
-
-    def __eq__(self, other):
-        return self.x - Vector.TOLERANCE <= other.x <= self.x + Vector.TOLERANCE \
-               and self.y - Vector.TOLERANCE <= other.y <= self.y + Vector.TOLERANCE
-
-    def __str__(self):
-        return f"({display_value(self.x)}, {display_value(self.y)})"
-
-    def __repr__(self):
-        return self.__str__()
-
     def __sub__(self, other):
         return Vector(self.x - other.x, self.y - other.y)
 
 
-class Point(Vector):
-    def __init__(self, x, y):
-        super().__init__(x, y)
+Vector.ZERO = Vector(0, 0)
 
 
 class Beam:
@@ -102,18 +113,18 @@ class Beam:
     """
 
     def __init__(self, joint1: Point, joint2: Point):
-        self.joint1 = joint1
-        self.joint2 = joint2
+        self.joint1: Point = joint1
+        self.joint2: Point = joint2
 
     def __eq__(self, other):
-        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) \
-               or (self.joint2 == other.joint1 and self.joint1 == other.joint2)
+        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) or (
+                self.joint2 == other.joint1 and self.joint1 == other.joint2)
 
     def __hash__(self):
-        return hash(self.joint1) + hash(self.joint2)
+        return hash(self.joint1) + hash(self.joint2)  # Addition because commutative
 
     def __str__(self):
-        return f"{repr(self.joint1)}->{repr(self.joint2)}"
+        return f"{repr(self.joint1)}<->{repr(self.joint2)}"
 
     def __repr__(self):
         return self.__str__()
@@ -123,20 +134,91 @@ class Beam:
 
 
 class BridgeData:
-    def __init__(self, beams: Set[Beam], load_per_unit_length, supports: Set[Point], height_of_deck):
+    def __init__(self, beams: Set[Beam], support_joints: Set[Point], area_load, width):
         """
         :param beams: A dictionary where each joint is a key and each joint points to a set of joints that is connected to the starting joint
-        :param supports: A set where with the joints where there's an upward support
+        :param support_joints: A set where with the joints where there's an upward support
         """
-        self.supports = supports
-        self.beams = beams
-        self.load_per_unit_length = load_per_unit_length
-        self.height_of_deck = height_of_deck
+        self.beams: Set[Beam] = beams
+        self.support_joints: Set[Point] = support_joints
+        self.area_load: float = area_load
+        self.width: float = width
 
 
-class CalculatedBridge:
+class BridgeFactory:
+    @staticmethod
+    def get_beams_for_equilateral_bridge(number_of_panels: int, span: float):
+        beams = set()
+        side_length = span / number_of_panels
+        height = side_length * math.sqrt(3) / 2
+
+        previous_top_corner = None
+
+        for i in range(number_of_panels):
+            # Corners
+            left_corner = Point(i * side_length, 0)
+            top_corner = Point((i + 0.5) * side_length, height)
+            right_corner = Point((i + 1) * side_length, 0)
+
+            beams.add(Beam(left_corner, right_corner))
+            beams.add(Beam(left_corner, top_corner))
+            beams.add(Beam(right_corner, top_corner))
+
+            if previous_top_corner is not None:
+                beams.add(Beam(previous_top_corner, top_corner))
+
+            previous_top_corner = top_corner
+
+        return beams
+
+    @staticmethod
+    def get_beams_for_right_angle_bridge(number_of_panels: int, span: float, angle_ratio: float):
+        """
+        :param number_of_panels: The number of times the sequence repeats
+        :param span: The span of the bridge
+        :param angle_ratio: The height divided by the width of one panel
+        """
+        beams = set()
+
+        chord_length = span / number_of_panels
+        height = chord_length * angle_ratio
+
+        if number_of_panels % 2 == 1:
+            raise Exception("Uneven number of panels. Can't build beams.")
+
+        for i in range(number_of_panels):
+            top_left = Point(i * chord_length, height)
+            top_right = Point((i + 1) * chord_length, height)
+            bottom_left = Point(i * chord_length, 0)
+            bottom_right = Point((i + 1) * chord_length, 0)
+
+            beams.add(Beam(bottom_left, bottom_right))
+
+            if i < number_of_panels / 2:
+                beams.add(Beam(bottom_left, top_right))
+            else:
+                beams.add(Beam(top_left, bottom_right))
+
+            if i == 0:
+                beams.add(Beam(bottom_right, top_right))
+            elif i == number_of_panels - 1:
+                pass
+            else:
+                beams.add(Beam(top_left, top_right))
+                beams.add(Beam(bottom_right, top_right))
+
+        return beams
+
+    @staticmethod
+    def add_supports_to_bridge(bridge: BridgeData, supports: Set[Point]):
+        for support in supports:
+            bridge.support_joints.add(support)
+
+
+class BridgeCalculator:
     def __init__(self, bridge: BridgeData):
         self.data = bridge
+        self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
         self.vertical_span: Optional[Tuple[float, float]] = None
         self.horizontal_span: Optional[Tuple[float, float]] = None
         self.member_forces: Dict[Beam, Optional[float]] = {}
@@ -160,35 +242,41 @@ class CalculatedBridge:
         if self.joints == {}:
             self.build_joint_map()
 
-        inline_joint_x_values = []
+        external_forces_y_pos = None
+        for support in self.data.support_joints:
+            external_forces_y_pos = support.y
+
+        load_bearing_joints_x_pos = []
         for joint in self.joints:
-            if joint.y != self.data.height_of_deck:
-                continue
-            inline_joint_x_values.append(joint.x)
+            if joint.y == external_forces_y_pos:
+                load_bearing_joints_x_pos.append(joint.x)
 
-        inline_joint_x_values = sorted(inline_joint_x_values)
+        load_bearing_joints_x_pos = sorted(load_bearing_joints_x_pos)
+        supports_x_pos = sorted([support.x for support in self.data.support_joints])
 
-        for index, x_value in enumerate(inline_joint_x_values):
-            if index == 0:
-                length_covered = (inline_joint_x_values[index + 1] - x_value) / 2
-            elif index < len(inline_joint_x_values) - 1:
-                length_covered = (inline_joint_x_values[index + 1] - inline_joint_x_values[index - 1]) / 2
+        # Loop from left to right throughout the joints
+        for i, x_pos in enumerate(load_bearing_joints_x_pos):
+            if i == 0:
+                dist_to_neighbouring_joints = (load_bearing_joints_x_pos[i + 1] - x_pos)
+            elif i < len(load_bearing_joints_x_pos) - 1:
+                dist_to_neighbouring_joints = (load_bearing_joints_x_pos[i + 1] - load_bearing_joints_x_pos[i - 1])
             else:
-                length_covered = (x_value - inline_joint_x_values[index - 1]) / 2
-            self.external_forces[Point(x_value, self.data.height_of_deck)] = Vector(0,
-                                                                                    -length_covered * self.data.load_per_unit_length)
+                dist_to_neighbouring_joints = (x_pos - load_bearing_joints_x_pos[i - 1])
 
-        sorted_support_x_values = sorted([support.x for support in self.data.supports])
+            self.external_forces[
+                Point(x_pos, external_forces_y_pos)] = Vector(0,
+                                                              -dist_to_neighbouring_joints / 2 * self.load_per_unit_length)
 
-        for index, x_value in enumerate(sorted_support_x_values):
-            if index == 0:
-                length_covered = (sorted_support_x_values[index + 1] - x_value) / 2
-            elif index < len(sorted_support_x_values) - 1:
-                length_covered = (sorted_support_x_values[index + 1] - sorted_support_x_values[index - 1]) / 2
+        for i, x_pos in enumerate(supports_x_pos):
+            if i == 0:
+                dist_to_neighbouring_joints = (supports_x_pos[i + 1] - x_pos)
+            elif i < len(supports_x_pos) - 1:
+                dist_to_neighbouring_joints = (supports_x_pos[i + 1] - supports_x_pos[i - 1])
             else:
-                length_covered = (x_value - sorted_support_x_values[index - 1]) / 2
-            self.external_forces[Point(x_value, self.data.height_of_deck)] += Vector(0,
-                                                                                     length_covered * self.data.load_per_unit_length)
+                dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
+
+            self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(0,
+                                                                                dist_to_neighbouring_joints / 2 * self.load_per_unit_length)
 
     def get_vertical_span(self):
         if self.vertical_span is not None:
@@ -268,7 +356,7 @@ class CalculatedBridge:
                     if sum_of_forces == Vector(0, 0):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = 0
                     elif sum_of_forces.is_collinear(direction_vector):
-                        self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.sign_difference(
+                        self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.cos_theta(
                             direction_vector) * -1 * sum_of_forces.get_magnitude()
                     else:
                         print(
@@ -282,14 +370,12 @@ class CalculatedBridge:
                     unknown_force_2 = Vector.from_a_to_b(joint, unknown_joint_2)
 
                     if unknown_force_1.is_collinear(unknown_force_2):
-                        if sum_of_forces != Vector(0, 0):
-                            print(
-                                f"Sum of the forces at joint {joint} cannot be zero since 2 unknown beams are collinear.")
-                    else:
-                        (force_1, force_2) = CalculatedBridge.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
-                                                                                     unknown_force_2)
-                        self.member_forces[Beam(joint, unknown_joint_1)] = force_1
-                        self.member_forces[Beam(joint, unknown_joint_2)] = force_2
+                        continue
+
+                    (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
+                                                                                 unknown_force_2)
+                    self.member_forces[Beam(joint, unknown_joint_1)] = force_1
+                    self.member_forces[Beam(joint, unknown_joint_2)] = force_2
 
                     calculated_joints.add(joint)
 
@@ -297,20 +383,20 @@ class CalculatedBridge:
                     unknown_joint_1 = unknown_opposing_joints.pop()
                     unknown_joint_2 = unknown_opposing_joints.pop()
                     unknown_joint_3 = unknown_opposing_joints.pop()
-                    unknown_force_1 = unknown_joint_1 - joint
-                    unknown_force_2 = unknown_joint_2 - joint
-                    unknown_force_3 = unknown_joint_3 - joint
+                    unknown_force_1 = Vector.from_a_to_b(joint, unknown_joint_1)
+                    unknown_force_2 = Vector.from_a_to_b(joint, unknown_joint_2)
+                    unknown_force_3 = Vector.from_a_to_b(joint, unknown_joint_3)
 
                     if unknown_force_1.is_collinear(unknown_force_2):
-                        (force_1, force_3) = CalculatedBridge.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
+                        (force_1, force_3) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_3)
                         self.member_forces[Beam(joint, unknown_joint_3)] = force_3
                     elif unknown_force_2.is_collinear(unknown_force_3):
-                        (force_1, force_2) = CalculatedBridge.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
+                        (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_2)
                         self.member_forces[Beam(joint, unknown_joint_1)] = force_1
                     elif unknown_force_3.is_collinear(unknown_force_1):
-                        (force_1, force_2) = CalculatedBridge.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
+                        (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_2)
                         self.member_forces[Beam(joint, unknown_joint_2)] = force_2
 
@@ -329,45 +415,15 @@ class CalculatedBridge:
         return force_1, force_2
 
 
-class BridgeFactory:
-    @staticmethod
-    def build_equilateral_bridge(number_of_triangles: int, span: float, load_per_unit_length: float):
-        beams = set()
-        side_length = span / number_of_triangles
-        height = side_length * math.sqrt(3) / 2
-
-        previous_top_corner = None
-
-        for i in range(number_of_triangles):
-            # Corners
-            left_corner = Point(i * side_length, 0)
-            top_corner = Point((i + 0.5) * side_length, height)
-            right_corner = Point((i + 1) * side_length, 0)
-
-            beams.add(Beam(left_corner, right_corner))
-            beams.add(Beam(left_corner, top_corner))
-            beams.add(Beam(right_corner, top_corner))
-
-            if previous_top_corner is not None:
-                beams.add(Beam(previous_top_corner, top_corner))
-
-            previous_top_corner = top_corner
-
-        return BridgeData(beams, load_per_unit_length, {Point(0, 0), Point(span, 0)}, 0)
-
-    @staticmethod
-    def add_supports_to_bridge(bridge: BridgeData, supports: Set[Point]):
-        for support in supports:
-            bridge.supports.add(support)
-
-
 class BridgeGUI:
     MARGIN = 20
     HEIGHT_TARGET = 1000
-    HORIZONTAL_TARGET = 1200
+    HORIZONTAL_TARGET = 1400
     CANVAS_PADDING = 50
     LENGTH_OF_VECTOR = 50
-    LENGTH_TO_LABEL = 15
+    LENGTH_TO_LABEL = 25
+    HEIGHT_OF_LABEL = 10
+    WIDTH_OF_LABEL = 12
 
     def __init__(self):
         self.top = tkinter.Tk()
@@ -375,18 +431,18 @@ class BridgeGUI:
         self.canvas = None
         self.height = None
 
-    def draw_bridge(self, bridge: CalculatedBridge):
+    def draw_bridge(self, bridge: BridgeCalculator):
         self.create_canvas(bridge)
         self.draw_beams(bridge)
         self.draw_external_forces(bridge)
 
-    def draw_beams(self, bridge: CalculatedBridge):
+    def draw_beams(self, bridge: BridgeCalculator):
         for beam, force in bridge.member_forces.items():
             self.canvas.create_line(self.scalex(beam.joint1.x), self.scaley(beam.joint1.y),
                                     self.scalex(beam.joint2.x), self.scaley(beam.joint2.y))
             if force is not None:
-                label_position = self.scale_point(beam.joint2) + BridgeGUI.flip_vector_on_y(
-                    beam.joint1 - beam.joint2) / 2 * self.scale_factor
+                label_position = Vector.from_point(self.scale_point(beam.joint2)) + BridgeGUI.flip_vector_on_y(
+                    Vector.from_a_to_b(beam.joint2, beam.joint1)) / 2 * self.scale_factor
                 self.draw_label(label_position, force)
 
     def create_canvas(self, bridge):
@@ -403,7 +459,7 @@ class BridgeGUI:
         self.canvas = tkinter.Canvas(self.top, height=self.height,
                                      width=horizontal_span_distance * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING)
 
-    def draw_external_forces(self, bridge: CalculatedBridge):
+    def draw_external_forces(self, bridge: BridgeCalculator):
         for joint, force in bridge.external_forces.items():
             self.draw_vector(force, joint)
 
@@ -415,7 +471,7 @@ class BridgeGUI:
         # Flip y since 0 0 is at top
         unscaled_vector_to_draw = BridgeGUI.flip_vector_on_y(vector).get_unit_vector()
 
-        starting_point_scaled = self.scale_point(starting_point)
+        starting_point_scaled = Vector.from_point(self.scale_point(starting_point))
         end_point = unscaled_vector_to_draw * BridgeGUI.LENGTH_OF_VECTOR + starting_point_scaled
         self.canvas.create_line(starting_point_scaled.x, starting_point_scaled.y, end_point.x, end_point.y,
                                 arrow=tkinter.LAST)
@@ -423,10 +479,11 @@ class BridgeGUI:
                         vector.get_magnitude())
 
     def draw_label(self, position: Vector, content: float):
-        tkinter.Label(self.canvas, text=display_value(content)).place(x=position.x, y=position.y)
+        tkinter.Label(self.canvas, text=display_value(content)).place(x=position.x - BridgeGUI.WIDTH_OF_LABEL,
+                                                                      y=position.y - BridgeGUI.HEIGHT_OF_LABEL)
 
-    def scale_point(self, vector: Vector):
-        return Vector(self.scalex(vector.x), self.scaley(vector.y))
+    def scale_point(self, point: Point) -> Point:
+        return Point(self.scalex(point.x), self.scaley(point.y))
 
     def scalex(self, value):
         return value * self.scale_factor + BridgeGUI.CANVAS_PADDING
@@ -440,9 +497,23 @@ class BridgeGUI:
 
 
 if __name__ == "__main__":
-    myBridge = BridgeFactory.build_equilateral_bridge(4, 40, 1)
-    calculatedBridge = CalculatedBridge(myBridge)
-    calculatedBridge.calculate_member_forces()
+    AREA_LOAD = 5 + 1 + 0.75
+    WIDTH = 3.7
+    SPAN = 107.96
+
+    beams = BridgeFactory.get_beams_for_right_angle_bridge(8, SPAN / 3, 4 / 3)
+    supports = {
+        Point(0, 0),
+        Point(SPAN / 3, 0)
+    }
+    bridge = BridgeData(beams, supports, AREA_LOAD, WIDTH)
+    # myBridge = BridgeFactory.build_equilateral_bridge(24, SPAN, LOAD_PER_UNIT_LENGTH)
+    # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN/2, 0)})
+    # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN / 3, 0), Point(SPAN / 3 * 2, 0)})
+    bridge_calculator = BridgeCalculator(bridge)
+    bridge_calculator.build_joint_map()
+    bridge_calculator.calculate_member_forces()
+
     GUI = BridgeGUI()
-    GUI.draw_bridge(calculatedBridge)
+    GUI.draw_bridge(bridge_calculator)
     GUI.display()
