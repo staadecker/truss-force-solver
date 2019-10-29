@@ -35,7 +35,7 @@ class PairOfValues:
         self.y = y
 
     def __str__(self):
-        return f"({self.x}, {self.y})"
+        return f"({display_value(self.x)}, {display_value(self.y)})"
 
     def __repr__(self):
         return self.__str__()
@@ -219,8 +219,7 @@ class BridgeCalculator:
     def __init__(self, bridge: BridgeData):
         self.data = bridge
         self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
-        self.vertical_span: Optional[Tuple[float, float]] = None
-        self.horizontal_span: Optional[Tuple[float, float]] = None
+        self.enclosing_rectangle: Optional[Tuple] = None  # x_min, y_min, x_max, y_max
         self.member_forces: Dict[Beam, Optional[float]] = {}
         self.joints = {}
         self.external_forces = {}
@@ -229,6 +228,7 @@ class BridgeCalculator:
         # Build up joints
         for beam in self.data.beams:
             self.member_forces[beam] = None
+
             if beam.joint1 not in self.joints:
                 self.joints[beam.joint1] = set()
 
@@ -239,10 +239,8 @@ class BridgeCalculator:
             self.joints[beam.joint2].add(beam.joint1)
 
     def calculate_external_forces(self):
-        if self.joints == {}:
-            self.build_joint_map()
-
         external_forces_y_pos = None
+
         for support in self.data.support_joints:
             external_forces_y_pos = support.y
 
@@ -278,31 +276,20 @@ class BridgeCalculator:
             self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(0,
                                                                                 dist_to_neighbouring_joints / 2 * self.load_per_unit_length)
 
-    def get_vertical_span(self):
-        if self.vertical_span is not None:
-            return self.vertical_span
+    def get_enclosing_rectangle(self):
+        if self.enclosing_rectangle is not None:
+            return self.enclosing_rectangle
 
-        min_value = None
-        max_value = None
+        (min_x, min_y, max_x, max_y) = (None, None, None, None)
         for joint in self.joints.keys():
-            min_value = min(joint.y, min_value) if min_value is not None else joint.y
-            max_value = max(joint.y, max_value) if max_value is not None else joint.y
+            min_x = min(joint.x, min_x) if min_x is not None else joint.x
+            min_y = min(joint.y, min_y) if min_y is not None else joint.y
 
-        self.vertical_span = (min_value, max_value)
-        return self.vertical_span
+            max_x = max(joint.x, max_x) if max_x is not None else joint.x
+            max_y = max(joint.y, max_y) if max_y is not None else joint.y
 
-    def get_horizontal_span(self):
-        if self.horizontal_span is not None:
-            return self.horizontal_span
-
-        min_value = None
-        max_value = None
-        for joint in self.joints.keys():
-            min_value = min(joint.x, min_value) if min_value is not None else joint.x
-            max_value = max(joint.x, max_value) if max_value is not None else joint.x
-
-        self.horizontal_span = (min_value, max_value)
-        return self.horizontal_span
+        self.enclosing_rectangle = (min_x, min_y, max_x, max_y)
+        return self.enclosing_rectangle
 
     def calculate_member_forces(self):
         if len(self.joints) == 0:
@@ -418,46 +405,51 @@ class BridgeCalculator:
 class BridgeGUI:
     MARGIN = 20
     HEIGHT_TARGET = 1000
-    HORIZONTAL_TARGET = 1400
+    WIDTH_TARGET = 1400
     CANVAS_PADDING = 50
     LENGTH_OF_VECTOR = 50
     LENGTH_TO_LABEL = 25
     HEIGHT_OF_LABEL = 10
     WIDTH_OF_LABEL = 12
+    INFORMATION_Y_SPACING = 25
+    INFORMATION_X_SPACING = 500
+    INFORMATION_LOOP_AFTER = 10
 
     def __init__(self):
         self.top = tkinter.Tk()
         self.scale_factor = None
         self.canvas = None
         self.height = None
+        self.information_counter = 0
 
     def draw_bridge(self, bridge: BridgeCalculator):
         self.create_canvas(bridge)
         self.draw_beams(bridge)
         self.draw_external_forces(bridge)
 
+    def create_canvas(self, bridge: BridgeCalculator):
+        (min_x, min_y, max_x, max_y) = bridge.get_enclosing_rectangle()
+        vertical_span = max_y - min_y
+        horizontal_span = max_x - min_x
+
+        scale_factor_vertical = BridgeGUI.HEIGHT_TARGET / vertical_span
+        scale_factor_horizontal = BridgeGUI.WIDTH_TARGET / horizontal_span
+
+        self.scale_factor = min(scale_factor_horizontal, scale_factor_vertical)
+
+        self.height = (vertical_span * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING) * 2
+        width = horizontal_span * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING
+
+        self.canvas = tkinter.Canvas(self.top, height=self.height, width=width)
+
     def draw_beams(self, bridge: BridgeCalculator):
         for beam, force in bridge.member_forces.items():
-            self.canvas.create_line(self.scalex(beam.joint1.x), self.scaley(beam.joint1.y),
-                                    self.scalex(beam.joint2.x), self.scaley(beam.joint2.y))
+            self.canvas.create_line(self.scale_x(beam.joint1.x), self.scale_y(beam.joint1.y),
+                                    self.scale_x(beam.joint2.x), self.scale_y(beam.joint2.y))
             if force is not None:
                 label_position = Vector.from_point(self.scale_point(beam.joint2)) + BridgeGUI.flip_vector_on_y(
                     Vector.from_a_to_b(beam.joint2, beam.joint1)) / 2 * self.scale_factor
                 self.draw_label(label_position, force)
-
-    def create_canvas(self, bridge):
-        vertical_span = bridge.get_vertical_span()
-        horizontal_span = bridge.get_horizontal_span()
-        vertical_span_distance = vertical_span[1] - vertical_span[0]
-        horizontal_span_distance = horizontal_span[1] - horizontal_span[0]
-        scale_factor_vertical = BridgeGUI.HEIGHT_TARGET / vertical_span_distance
-        scale_factor_horizontal = BridgeGUI.HORIZONTAL_TARGET / horizontal_span_distance
-
-        self.scale_factor = min(scale_factor_horizontal, scale_factor_vertical)
-        self.height = vertical_span_distance * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING
-
-        self.canvas = tkinter.Canvas(self.top, height=self.height,
-                                     width=horizontal_span_distance * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING)
 
     def draw_external_forces(self, bridge: BridgeCalculator):
         for joint, force in bridge.external_forces.items():
@@ -467,53 +459,69 @@ class BridgeGUI:
         self.canvas.pack()
         self.top.mainloop()
 
-    def draw_vector(self, vector, starting_point):
+    def draw_vector(self, vector: Vector, starting_point: Point):
         # Flip y since 0 0 is at top
         unscaled_vector_to_draw = BridgeGUI.flip_vector_on_y(vector).get_unit_vector()
 
-        starting_point_scaled = Vector.from_point(self.scale_point(starting_point))
-        end_point = unscaled_vector_to_draw * BridgeGUI.LENGTH_OF_VECTOR + starting_point_scaled
-        self.canvas.create_line(starting_point_scaled.x, starting_point_scaled.y, end_point.x, end_point.y,
-                                arrow=tkinter.LAST)
-        self.draw_label(starting_point_scaled + unscaled_vector_to_draw * BridgeGUI.LENGTH_TO_LABEL,
-                        vector.get_magnitude())
+        vector_tail = Vector.from_point(self.scale_point(starting_point))
+        vector_tip = unscaled_vector_to_draw * BridgeGUI.LENGTH_OF_VECTOR + vector_tail
+        label_position = vector_tail + unscaled_vector_to_draw * BridgeGUI.LENGTH_TO_LABEL
+
+        self.draw_line(vector_tail, vector_tip, arrow=True)
+        self.draw_label(label_position, vector.get_magnitude())
 
     def draw_label(self, position: Vector, content: float):
         tkinter.Label(self.canvas, text=display_value(content)).place(x=position.x - BridgeGUI.WIDTH_OF_LABEL,
                                                                       y=position.y - BridgeGUI.HEIGHT_OF_LABEL)
 
-    def scale_point(self, point: Point) -> Point:
-        return Point(self.scalex(point.x), self.scaley(point.y))
+    def draw_line(self, a: PairOfValues, b: PairOfValues, arrow=False):
+        self.canvas.create_line(a.x, a.y, b.x, b.y, arrow=tkinter.LAST if arrow else None)
 
-    def scalex(self, value):
+    def add_information(self, information: str):
+        x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
+        y_pos = BridgeGUI.CANVAS_PADDING + (
+                    self.information_counter % BridgeGUI.INFORMATION_LOOP_AFTER) * BridgeGUI.INFORMATION_Y_SPACING
+        tkinter.Label(self.canvas, text=information).place(x=x_pos,
+                                                           y=y_pos)
+        self.information_counter += 1
+
+    def scale_point(self, point: Point) -> Point:
+        return Point(self.scale_x(point.x), self.scale_y(point.y))
+
+    def scale_x(self, value):
         return value * self.scale_factor + BridgeGUI.CANVAS_PADDING
 
-    def scaley(self, value):
+    def scale_y(self, value):
         return self.height - value * self.scale_factor - BridgeGUI.CANVAS_PADDING
 
-    @staticmethod
-    def flip_vector_on_y(vector):
+    @classmethod
+    def flip_vector_on_y(cls, vector):
         return Vector(vector.x, -vector.y)
 
 
 if __name__ == "__main__":
     AREA_LOAD = 5 + 1 + 0.75
     WIDTH = 3.7
-    SPAN = 107.96
+    SPAN = 107.96 / 3
+    HEIGHT_WIDTH_RATIO = 4 / 3
 
-    beams = BridgeFactory.get_beams_for_right_angle_bridge(8, SPAN / 3, 4 / 3)
+    beams = BridgeFactory.get_beams_for_right_angle_bridge(8, SPAN, HEIGHT_WIDTH_RATIO)
     supports = {
         Point(0, 0),
-        Point(SPAN / 3, 0)
+        Point(SPAN, 0)
     }
-    bridge = BridgeData(beams, supports, AREA_LOAD, WIDTH)
+    myBridge = BridgeData(beams, supports, AREA_LOAD, WIDTH)
     # myBridge = BridgeFactory.build_equilateral_bridge(24, SPAN, LOAD_PER_UNIT_LENGTH)
     # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN/2, 0)})
     # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN / 3, 0), Point(SPAN / 3 * 2, 0)})
-    bridge_calculator = BridgeCalculator(bridge)
+    bridge_calculator = BridgeCalculator(myBridge)
     bridge_calculator.build_joint_map()
     bridge_calculator.calculate_member_forces()
 
     GUI = BridgeGUI()
     GUI.draw_bridge(bridge_calculator)
+    GUI.add_information(f"Area Load: {AREA_LOAD} kN/mm^2")
+    GUI.add_information(f"Width: 3.70m")
+    GUI.add_information(f"Span: {display_value(SPAN)}m")
+    GUI.add_information(f"Height/Width ratio: {display_value(HEIGHT_WIDTH_RATIO)}")
     GUI.display()
