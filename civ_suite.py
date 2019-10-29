@@ -389,6 +389,15 @@ class BridgeCalculator:
 
             passes += 1
 
+    def get_highest_member_forces(self):
+        compression = 0
+        tension = 0
+        for force in self.member_forces.values():
+            compression = min(force, compression)
+            tension = max(force, tension)
+
+        return compression, tension
+
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):
         a = sum_of_forces.x
@@ -478,9 +487,10 @@ class BridgeGUI:
         self.canvas.create_line(a.x, a.y, b.x, b.y, arrow=tkinter.LAST if arrow else None)
 
     def add_information(self, information: str):
-        x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
+        x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (
+                    self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
         y_pos = BridgeGUI.CANVAS_PADDING + (
-                    self.information_counter % BridgeGUI.INFORMATION_LOOP_AFTER) * BridgeGUI.INFORMATION_Y_SPACING
+                self.information_counter % BridgeGUI.INFORMATION_LOOP_AFTER) * BridgeGUI.INFORMATION_Y_SPACING
         tkinter.Label(self.canvas, text=information).place(x=x_pos,
                                                            y=y_pos)
         self.information_counter += 1
@@ -517,6 +527,7 @@ if __name__ == "__main__":
     bridge_calculator = BridgeCalculator(myBridge)
     bridge_calculator.build_joint_map()
     bridge_calculator.calculate_member_forces()
+    (max_compression, max_tension) = bridge_calculator.get_highest_member_forces()
 
     GUI = BridgeGUI()
     GUI.draw_bridge(bridge_calculator)
@@ -524,4 +535,6 @@ if __name__ == "__main__":
     GUI.add_information(f"Width: 3.70m")
     GUI.add_information(f"Span: {display_value(SPAN)}m")
     GUI.add_information(f"Height/Width ratio: {display_value(HEIGHT_WIDTH_RATIO)}")
+    GUI.add_information(f"Max compression: {display_value(max_compression)}kN")
+    GUI.add_information(f"Max tension: {display_value(max_tension)}kN")
     GUI.display()
