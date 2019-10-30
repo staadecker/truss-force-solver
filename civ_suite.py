@@ -10,6 +10,9 @@ import tkinter
 
 NUMBER_OF_SIGNIFICANT_DIGITS = 3
 TOLERANCE = 10 ** -8  # Used when checking if values are equal
+FACTOR_OF_SAFETY_BUCKLING = 3
+FACTOR_OF_SAFETY_YIELDING = 2
+YIELD_STRESS = 350  # MPa
 
 
 def values_are_equal(value_1: float, value_2: float) -> bool:
@@ -132,6 +135,9 @@ class Beam:
     def get_direction_vector(self) -> Vector:
         return Vector.from_a_to_b(self.joint1, self.joint2)
 
+    def get_length(self) -> float:
+        return self.get_direction_vector().get_magnitude()
+
 
 class BridgeData:
     def __init__(self, beams: Set[Beam], support_joints: Set[Point], area_load, width):
@@ -223,6 +229,10 @@ class BridgeCalculator:
         self.member_forces: Dict[Beam, Optional[float]] = {}
         self.joints = {}
         self.external_forces = {}
+        self.max_compression = None
+        self.max_tension = None
+        self.minimum_area = None
+        self.minimum_i = None
 
     def build_joint_map(self):
         # Build up joints
@@ -390,13 +400,25 @@ class BridgeCalculator:
             passes += 1
 
     def get_highest_member_forces(self):
-        compression = 0
-        tension = 0
+        self.max_compression = 0
+        self.max_tension = 0
         for force in self.member_forces.values():
-            compression = min(force, compression)
-            tension = max(force, tension)
+            self.max_compression = min(force, self.max_compression)
+            self.max_tension = max(force, self.max_tension)
 
-        return compression, tension
+        return self.max_compression, self.max_tension
+
+    def get_minimum_area_and_i(self):
+        self.minimum_area = FACTOR_OF_SAFETY_YIELDING * max(self.max_tension, abs(self.max_compression)) / YIELD_STRESS
+
+        self.minimum_i = 0
+        for beam, force in self.member_forces.items():
+            if force < 0:  # Compression
+                i = FACTOR_OF_SAFETY_BUCKLING * abs(force) * (beam.get_length() ** 2) / ((math.pi ** 2) * 200000)
+                if i > self.minimum_i:
+                    self.minimum_i = i
+
+        return self.minimum_area, self.minimum_i
 
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):
@@ -488,7 +510,7 @@ class BridgeGUI:
 
     def add_information(self, information: str):
         x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (
-                    self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
+                self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
         y_pos = BridgeGUI.CANVAS_PADDING + (
                 self.information_counter % BridgeGUI.INFORMATION_LOOP_AFTER) * BridgeGUI.INFORMATION_Y_SPACING
         tkinter.Label(self.canvas, text=information).place(x=x_pos,
@@ -515,7 +537,7 @@ if __name__ == "__main__":
     SPAN = 107.96 / 3
     HEIGHT_WIDTH_RATIO = 4 / 3
 
-    beams = BridgeFactory.get_beams_for_right_angle_bridge(8, SPAN, HEIGHT_WIDTH_RATIO)
+    beams = BridgeFactory.get_beams_for_right_angle_bridge(10, SPAN, HEIGHT_WIDTH_RATIO)
     supports = {
         Point(0, 0),
         Point(SPAN, 0)
@@ -528,6 +550,10 @@ if __name__ == "__main__":
     bridge_calculator.build_joint_map()
     bridge_calculator.calculate_member_forces()
     (max_compression, max_tension) = bridge_calculator.get_highest_member_forces()
+    (minimum_area, minimum_i) = bridge_calculator.get_minimum_area_and_i()
+
+    minimum_area *= 1000
+    minimum_i *= 10 ** 3  # Since meters and kN go to mm and N and then displayed as 10^6
 
     GUI = BridgeGUI()
     GUI.draw_bridge(bridge_calculator)
@@ -537,4 +563,7 @@ if __name__ == "__main__":
     GUI.add_information(f"Height/Width ratio: {display_value(HEIGHT_WIDTH_RATIO)}")
     GUI.add_information(f"Max compression: {display_value(max_compression)}kN")
     GUI.add_information(f"Max tension: {display_value(max_tension)}kN")
+    GUI.add_information(f"Minimum area: {display_value(minimum_area)}mm^2")
+    GUI.add_information(f"Minimum I: {display_value(minimum_i)} x 10^6 mm^4")
+
     GUI.display()
