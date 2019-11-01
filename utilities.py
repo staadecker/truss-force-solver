@@ -1,6 +1,19 @@
 import math
+import quantities as pq
 
-from core import values_are_equal
+def values_are_equal(value_1, value_2) -> bool:
+    float_1 = float(value_1)
+    return float_1 - TOLERANCE <= float(value_2) <= float_1 + TOLERANCE
+
+
+def display_float(value):
+    if values_are_equal(0, value):
+        return "0.00" + " " + str(value.dimensionality)
+    number_of_digits = NUMBER_OF_SIGNIFICANT_DIGITS - int(math.floor(math.log10(abs(value)))) - 1
+    # If decimals are dropped, convert to int
+    if number_of_digits <= 0:
+        return str(int(round(value, number_of_digits))) + " " + str(value.dimensionality)
+    return str(round(value, number_of_digits))
 
 
 class PairOfValues:
@@ -79,35 +92,12 @@ class Vector(PairOfValues):
         return Vector(self.x - other.x, self.y - other.y)
 
 
-class Beam:
-    """
-    A pair of points that represents a beam with the special property that the order of the pair does not matter
-    """
+Vector.ZERO = Vector(0, 0)
 
-    def __init__(self, joint1: Point, joint2: Point):
-        """
-        :param joint1: Position of one end of the beam
-        :param joint2: Position of the other end of the beam
-        :param hss_set: String representing the
-        """
-        self.joint1: Point = joint1
-        self.joint2: Point = joint2
-
-    def __eq__(self, other):
-        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) or (
-                self.joint2 == other.joint1 and self.joint1 == other.joint2)
-
-    def __hash__(self):
-        return hash(self.joint1) + hash(self.joint2)  # Addition because commutative
-
-    def __str__(self):
-        return f"{repr(self.joint1)}<->{repr(self.joint2)}"
-
-    def __repr__(self):
-        return self.__str__()
-
-    def get_direction_vector(self) -> Vector:
-        return Vector.from_a_to_b(self.joint1, self.joint2)
-
-    def get_length(self):
-        return self.get_direction_vector().get_magnitude()
+NUMBER_OF_SIGNIFICANT_DIGITS = 3
+TOLERANCE = 10 ** -8  # Used when checking if floats are equal
+FACTOR_OF_SAFETY_BUCKLING = 3
+FACTOR_OF_SAFETY_YIELDING = 2
+YIELD_STRESS = 350 * pq.MPa
+YOUNG_MODULUS = 200000 * pq.MPa
+kN = pq.UnitQuantity("kiloNewton", pq.N * 1000, "kN")

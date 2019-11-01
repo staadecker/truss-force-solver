@@ -1,7 +1,7 @@
 import tkinter
 
-from core import BridgeCalculator, kN, display_float
-from utilities import Vector, Point, PairOfValues
+from core import BridgeCalculator
+from utilities import Vector, Point, PairOfValues, kN, display_float
 
 
 class BridgeGUI:
@@ -14,8 +14,8 @@ class BridgeGUI:
     HEIGHT_OF_LABEL = 10
     WIDTH_OF_LABEL = 12
     INFORMATION_Y_SPACING = 25
-    INFORMATION_X_SPACING = 500
-    INFORMATION_LOOP_AFTER = 10
+    INFORMATION_X_SPACING = 400
+    INFORMATION_LOOP_AFTER = 7
 
     def __init__(self):
         self.top = tkinter.Tk()
@@ -45,13 +45,13 @@ class BridgeGUI:
         self.canvas = tkinter.Canvas(self.top, height=float(self.height), width=float(width))
 
     def draw_beams(self, bridge: BridgeCalculator):
-        for beam, force in bridge.member_forces.items():
+        for beam, property in bridge.bridge.beams.items():
             self.draw_line(self.scale_point(beam.joint1), self.scale_point(beam.joint2),
-                           color=bridge.data.beams[beam].hss_set.color)
-            if force is not None:
+                           color=property.beam_group.color)
+            if property.member_force is not None:
                 label_position = Vector.from_point(self.scale_point(beam.joint2)) + BridgeGUI.flip_vector_on_y(
                     Vector.from_a_to_b(beam.joint2, beam.joint1)) / 2 * self.scale_factor
-                self.draw_label(label_position, force.rescale(kN))
+                self.draw_label(label_position, property.member_force.rescale(kN))
 
     def draw_external_forces(self, bridge: BridgeCalculator):
         for joint, force in bridge.external_forces.items():
@@ -82,7 +82,7 @@ class BridgeGUI:
                                 float(b.y.simplified), arrow=tkinter.LAST if arrow else None, fill=color)
 
     def add_information(self, information: str):
-        x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (
+        x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_X_SPACING * (
                 self.information_counter // BridgeGUI.INFORMATION_LOOP_AFTER)
         y_pos = BridgeGUI.CANVAS_PADDING + (
                 self.information_counter % BridgeGUI.INFORMATION_LOOP_AFTER) * BridgeGUI.INFORMATION_Y_SPACING

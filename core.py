@@ -2,8 +2,7 @@ import math
 import quantities as pq
 from typing import Dict, Tuple, Set, Optional
 
-from graphics import BridgeGUI
-from utilities import Point, Vector, Beam
+from utilities import Point, Vector, FACTOR_OF_SAFETY_YIELDING, FACTOR_OF_SAFETY_BUCKLING, YOUNG_MODULUS, YIELD_STRESS
 
 """Limitations in bridge:
 - One joint cannot have two beams going in the same direction.
@@ -11,30 +10,48 @@ from utilities import Point, Vector, Beam
 """
 
 
-def values_are_equal(value_1, value_2) -> bool:
-    float_1 = float(value_1)
-    return float_1 - TOLERANCE <= float(value_2) <= float_1 + TOLERANCE
+class Beam:
+    """
+    A pair of points that represents a beam with the special property that the order of the pair does not matter
+    """
+
+    def __init__(self, joint1: Point, joint2: Point):
+        """
+        :param joint1: Position of one end of the beam
+        :param joint2: Position of the other end of the beam
+        """
+        self.joint1: Point = joint1
+        self.joint2: Point = joint2
+
+    def __eq__(self, other):
+        # Order doesn't matter!
+        return (self.joint1 == other.joint1 and self.joint2 == other.joint2) or (
+                self.joint2 == other.joint1 and self.joint1 == other.joint2)
+
+    def __hash__(self):
+        return hash(self.joint1) + hash(self.joint2)  # Addition because commutative and order shouldn't matter
+
+    def __str__(self):
+        return f"{repr(self.joint1)}<->{repr(self.joint2)}"
+
+    def __repr__(self):
+        return self.__str__()
+
+    def get_direction_vector(self) -> Vector:
+        """
+        Note that this function can return different direction vectors depending on the order of joint1 and joint2
+        """
+        return Vector.from_a_to_b(self.joint1, self.joint2)
+
+    def get_length(self):
+        return self.get_direction_vector().get_magnitude()
 
 
-def display_float(value):
-    if values_are_equal(0, value):
-        return "0.00" + " " + str(value.dimensionality)
-    number_of_digits = NUMBER_OF_SIGNIFICANT_DIGITS - int(math.floor(math.log10(abs(value)))) - 1
-    # If decimals are dropped, convert to int
-    if number_of_digits <= 0:
-        return str(int(round(value, number_of_digits))) + " " + str(value.dimensionality)
-    return str(round(value, number_of_digits))
-
-
-Vector.ZERO = Vector(0, 0)
-
-
-class HSSSet:
+class BeamGroup:
     def __init__(self, name, key: int, color: str):
         """
-
-        :param name:
-        :param key:
+        :param name: The name of the group.
+        :param key: An integer key to differentiate groups.
         :param color: A color that is supported by tkinter
         """
         self.name = name
@@ -48,24 +65,25 @@ class HSSSet:
         return self.key
 
 
-class HSSSetProperties:
+class BeamGroupProperties:
     def __init__(self):
         self.max_compression = 0
         self.max_tension = 0
-        self.min_area = 0
-        self.min_i = 0
+        self.min_area = 0  # Minimum area of HSS beams such that yielding does not occur
+        self.min_i = 0  # Minimum I of HSS beams such that buckling does not occur (compression only)
 
 
 class BeamProperties:
-    def __init__(self, hss_set: HSSSet):
-        self.hss_set = hss_set
+    def __init__(self, beam_group: BeamGroup):
+        self.beam_group = beam_group
+        self.member_force = None
 
 
 class BridgeData:
     def __init__(self, beams: Dict[Beam, BeamProperties], support_joints: Set[Point], area_load, width):
         """
-        :param beams: A dictionary where each joint is a key and each joint points to a set of joints that is connected to the starting joint
-        :param support_joints: A set where with the joints where there's an upward support
+        :param beams: A dictionary containing all beams and there respective properties
+        :param support_joints: A set with the joints where there's a support that applies a vertical force
         """
         self.beams: Dict[Beam, BeamProperties] = beams
         self.support_joints: Set[Point] = support_joints
@@ -75,8 +93,8 @@ class BridgeData:
 
 class BridgeFactory:
     def __init__(self):
-        self.hss_chord_set = HSSSet("Chords", 0, "red")
-        self.hss_web_set = HSSSet("Web", 1, "blue")
+        self.hss_chord_set = BeamGroup("Chords", 0, "red")
+        self.hss_web_set = BeamGroup("Web", 1, "blue")
 
     def get_beams_for_equilateral_bridge(self, number_of_panels: int, span):
         beams = {}
@@ -148,19 +166,18 @@ class BridgeFactory:
 
 class BridgeCalculator:
     def __init__(self, bridge: BridgeData):
-        self.data = bridge
-        self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
-        self.enclosing_rectangle: Optional[Tuple] = None  # x_min, y_min, x_max, y_max
-        self.member_forces: Dict[Beam, Optional] = {}
-        self.joints = {}
+        self.bridge = bridge
+        self.enclosing_rectangle: Optional[Tuple] = None  # (x_min, y_min, x_max, y_max)
+        self.joints = {}  # A mapping of joints to a set of connected joints
         self.external_forces = {}
-        self.hss_sets: Dict[HSSSet, HSSSetProperties] = {}
+        self.beam_groups: Dict[BeamGroup, BeamGroupProperties] = {}
+        self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
+
+        self.build_joint_map()
 
     def build_joint_map(self):
-        # Build up joints
-        for beam in self.data.beams:
-            self.member_forces[beam] = None
-
+        # For each beam, add joint connection to joint map
+        for beam in self.bridge.beams:
             if beam.joint1 not in self.joints:
                 self.joints[beam.joint1] = set()
 
@@ -173,7 +190,7 @@ class BridgeCalculator:
     def calculate_external_forces(self):
         external_forces_y_pos = None
 
-        for support in self.data.support_joints:
+        for support in self.bridge.support_joints:
             external_forces_y_pos = support.y
 
         load_bearing_joints_x_pos = []
@@ -182,7 +199,7 @@ class BridgeCalculator:
                 load_bearing_joints_x_pos.append(joint.x)
 
         load_bearing_joints_x_pos = sorted(load_bearing_joints_x_pos)
-        supports_x_pos = sorted([support.x for support in self.data.support_joints])
+        supports_x_pos = sorted([support.x for support in self.bridge.support_joints])
 
         # Loop from left to right throughout the joints
         for i, x_pos in enumerate(load_bearing_joints_x_pos):
@@ -247,7 +264,7 @@ class BridgeCalculator:
                 # Get forces in members
                 for opposing_joint in opposing_joints:
                     direction_vector = Vector.from_a_to_b(joint, opposing_joint)
-                    member_force = self.member_forces[Beam(joint, opposing_joint)]
+                    member_force = self.bridge.beams[Beam(joint, opposing_joint)].member_force
 
                     if member_force is None:
                         unknown_opposing_joints.append(opposing_joint)
@@ -273,9 +290,9 @@ class BridgeCalculator:
                     direction_vector = Vector.from_a_to_b(joint, unknown_opposing_joint)
 
                     if sum_of_forces == Vector(0, 0):
-                        self.member_forces[Beam(unknown_opposing_joint, joint)] = 0
+                        self.bridge.beams[Beam(unknown_opposing_joint, joint)].member_force = 0 * pq.N
                     elif sum_of_forces.is_collinear(direction_vector):
-                        self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.cos_theta(
+                        self.bridge.beams[Beam(unknown_opposing_joint, joint)].member_force = sum_of_forces.cos_theta(
                             direction_vector) * sum_of_forces.get_magnitude() * -1
                     else:
                         print(
@@ -293,8 +310,8 @@ class BridgeCalculator:
 
                     (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                  unknown_force_2)
-                    self.member_forces[Beam(joint, unknown_joint_1)] = force_1
-                    self.member_forces[Beam(joint, unknown_joint_2)] = force_2
+                    self.bridge.beams[Beam(joint, unknown_joint_1)].member_force = force_1
+                    self.bridge.beams[Beam(joint, unknown_joint_2)].member_force = force_2
 
                     calculated_joints.add(joint)
 
@@ -309,44 +326,46 @@ class BridgeCalculator:
                     if unknown_force_1.is_collinear(unknown_force_2):
                         (force_1, force_3) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_3)
-                        self.member_forces[Beam(joint, unknown_joint_3)] = force_3
+                        self.bridge.beams[Beam(joint, unknown_joint_3)].member_force = force_3
                     elif unknown_force_2.is_collinear(unknown_force_3):
                         (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_2)
-                        self.member_forces[Beam(joint, unknown_joint_1)] = force_1
+                        self.bridge.beams[Beam(joint, unknown_joint_1)].member_force = force_1
                     elif unknown_force_3.is_collinear(unknown_force_1):
                         (force_1, force_2) = BridgeCalculator.solve_for_two_unknowns(sum_of_forces, unknown_force_1,
                                                                                      unknown_force_2)
-                        self.member_forces[Beam(joint, unknown_joint_2)] = force_2
+                        self.bridge.beams[Beam(joint, unknown_joint_2)].member_force = force_2
 
             passes += 1
 
     def calculate_highest_member_forces(self):
-        for beam, force in self.member_forces.items():
-            current_hss_set = self.data.beams[beam].hss_set
-            if current_hss_set not in self.hss_sets:
-                self.hss_sets[current_hss_set] = HSSSetProperties()
+        for beam, property in self.bridge.beams.items():
+            current_hss_set = self.bridge.beams[beam].beam_group
+            if current_hss_set not in self.beam_groups:
+                self.beam_groups[current_hss_set] = BeamGroupProperties()
 
-            if force > 0:
-                self.hss_sets[current_hss_set].max_tension = max(self.hss_sets[current_hss_set].max_tension, force)
+            if property.member_force > 0:
+                self.beam_groups[current_hss_set].max_tension = max(self.beam_groups[current_hss_set].max_tension,
+                                                                    property.member_force)
 
-            elif force < 0:
-                self.hss_sets[current_hss_set].max_compression = min(self.hss_sets[current_hss_set].max_compression,
-                                                                     force)
+            elif property.member_force < 0:
+                self.beam_groups[current_hss_set].max_compression = min(
+                    self.beam_groups[current_hss_set].max_compression,
+                    property.member_force)
 
     def calculate_min_area_and_i(self):
-        for hss_property in self.hss_sets.values():
+        for hss_property in self.beam_groups.values():
             hss_property.min_area = max(hss_property.min_area,
                                         abs(hss_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS
 
-        for beam, force in self.member_forces.items():
-            if force < 0:
-                current_hss_set = self.data.beams[beam].hss_set
+        for beam, property in self.bridge.beams.items():
+            if property.member_force < 0:
+                current_hss_set = self.bridge.beams[beam].beam_group
 
                 # Compression
-                i = abs(force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (YOUNG_MODULUS *
+                i = abs(property.member_force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (YOUNG_MODULUS *
                                                                                          (math.pi ** 2))
-                self.hss_sets[current_hss_set].min_i = max(self.hss_sets[current_hss_set].min_i, i)
+                self.beam_groups[current_hss_set].min_i = max(self.beam_groups[current_hss_set].min_i, i)
 
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):
@@ -359,52 +378,3 @@ class BridgeCalculator:
         force_1 = (b * e - a * f) / (f * c - d * e) * unknown1.get_magnitude()
         force_2 = (a * d - c * b) / (c * f - d * e) * unknown2.get_magnitude()
         return force_1, force_2
-
-
-if __name__ == "__main__":
-    # Constants
-    NUMBER_OF_SIGNIFICANT_DIGITS = 3
-    TOLERANCE = 10 ** -8  # Used when checking if floats are equal
-    FACTOR_OF_SAFETY_BUCKLING = 3
-    FACTOR_OF_SAFETY_YIELDING = 2
-    YIELD_STRESS = 350 * pq.MPa
-    YOUNG_MODULUS = 200000 * pq.MPa
-    pq.set_default_units(length="mm")
-    kN = pq.UnitQuantity("kiloNewton", pq.N * 1000, "kN")
-
-    # Bridge constants
-    AREA_LOAD = (5 + 1 + 0.75) * kN / pq.m ** 2
-    WIDTH = 3.7 * pq.m
-    SPAN = 107.96 / 3 * pq.m
-    HEIGHT_WIDTH_RATIO = 4 / 3
-    NUMBER_OF_PANELS = 8
-
-    bridge_factory = BridgeFactory()
-    myBeams = bridge_factory.get_beams_for_equilateral_bridge(NUMBER_OF_PANELS, SPAN)
-    beams = bridge_factory.get_beams_for_right_angle_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
-    supports = {
-        Point(0 * pq.m, 0 * pq.m),
-        Point(SPAN, 0 * pq.m)
-    }
-    myBridge = BridgeData(myBeams, supports, AREA_LOAD, WIDTH)
-    # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN/2, 0)})
-    # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN / 3, 0), Point(SPAN / 3 * 2, 0)})
-    bridge_calculator = BridgeCalculator(myBridge)
-    bridge_calculator.build_joint_map()
-    bridge_calculator.calculate_member_forces()
-    bridge_calculator.calculate_highest_member_forces()
-    bridge_calculator.calculate_min_area_and_i()
-
-    GUI = BridgeGUI()
-    GUI.draw_bridge(bridge_calculator)
-
-    GUI.add_information(f"Area Load: {display_float(AREA_LOAD)}")
-    GUI.add_information(f"Width: {display_float(WIDTH)}")
-    GUI.add_information(f"Span: {display_float(SPAN)}")
-    GUI.add_information(f"Height/Width ratio: {display_float(HEIGHT_WIDTH_RATIO)}")
-
-    for hss_set, property in bridge_calculator.hss_sets.items():
-        GUI.add_information(f"{hss_set.name} ({hss_set.color}): Minimum area: {display_float(property.min_area.rescale('mm**2'))}")
-        GUI.add_information(f"{hss_set.name} ({hss_set.color}): Minimum I: {display_float(property.min_i.rescale('mm**4') / 10 ** 6)}*10**6")
-
-    GUI.display()
