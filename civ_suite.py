@@ -1,227 +1,60 @@
 import math
-from typing import Dict, Tuple, Set, Optional, List
+import quantities as pq
+from typing import Dict, Tuple, Set, Optional
 import tkinter
 
 """Limitations in bridge:
-- One joint cannot have to beams going in the same direction.
-- All external forces are aligned horizontally
-- Uniformly distributed load
+- One joint cannot have two beams going in the same direction.
+- All external forces act on one horizontally axis
 """
 
 
-def values_are_equal(value_1: float, value_2: float) -> bool:
-    return value_1 - TOLERANCE <= value_2 <= value_1 + TOLERANCE
+def values_are_equal(value_1, value_2) -> bool:
+    float_1 = float(value_1)
+    return float_1 - TOLERANCE <= float(value_2) <= float_1 + TOLERANCE
 
 
-def display_float(value: float):
+def display_float(value):
     if values_are_equal(0, value):
-        return "0.00"
+        return "0.00" + " " + str(value.dimensionality)
     number_of_digits = NUMBER_OF_SIGNIFICANT_DIGITS - int(math.floor(math.log10(abs(value)))) - 1
     # If decimals are dropped, convert to int
     if number_of_digits <= 0:
-        return str(int(round(value, 0)))
+        return str(int(round(value, number_of_digits))) + " " + str(value.dimensionality)
     return str(round(value, number_of_digits))
 
 
-class Unit:
-    def __init__(self, unit_map: Dict[str, int]):
-        self.unit_map = unit_map
-
-    def __eq__(self, other):
-        for unit_name, exponent in self.unit_map.items():
-            if unit_name not in other.unit_map:
-                return False
-            if other.unit_map[unit_name] != exponent:
-                return False
-
-        return True
-
-    def __pow__(self, power, modulo=None):
-        new_unit = Unit({})
-
-        for unit_name, exponent in self.unit_map.items():
-            new_exponent = exponent * power
-
-            if new_exponent != int(new_exponent):
-                raise Exception("Can't have fractions as exponents")
-
-            new_unit.unit_map[unit_name] = int(new_exponent)
-
-        return new_unit
-
-    def __mul__(self, other):
-        new_unit = Unit(dict(self.unit_map))  # Copy to not edit the original
-
-        for unit_name, exponent in other.unit_map.items():
-            if unit_name not in new_unit.unit_map:
-                new_unit.unit_map[unit_name] = 0
-
-            new_unit.unit_map[unit_name] += exponent
-
-            if new_unit.unit_map[unit_name] == 0:
-                del new_unit.unit_map[unit_name]
-
-        return new_unit
-
-    def __truediv__(self, other):
-        new_unit = Unit(dict(self.unit_map))  # Copy to not edit the original
-
-        for base_unit, exponent in other.unit_map.items():
-            if base_unit not in new_unit.unit_map:
-                new_unit.unit_map[base_unit] = 0
-
-            new_unit.unit_map[base_unit] -= exponent
-
-            if new_unit.unit_map[base_unit] == 0:
-                del new_unit.unit_map[base_unit]
-
-        return new_unit
-
-    def __str__(self):
-        string_builder = ""
-        for index, (base_unit, exponent) in enumerate(self.unit_map.items()):
-            if index != 0:
-                string_builder += " "
-            string_builder += base_unit
-            if exponent != 1:
-                string_builder += "^" + str(exponent)
-
-        return string_builder
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __hash__(self):
-        hash_sum = 0
-        for unit_name, exponent in self.unit_map.items():
-            hash_sum += hash((unit_name, exponent))
-
-        return hash_sum
-
-
-Unit.METER = Unit({"m": 1})
-Unit.NEWTON = Unit({"N": 1})
-Unit.NONE = Unit({})
-
-
-class Number:
-    def __init__(self, value, unit=Unit({})):
-        self.value = value
-        self.unit = unit
-
-    def __add__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value + other)
-
-        self.assert_units_equal(other)
-        return Number(self.value + other.value, self.unit)
-
-    def __sub__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value - other)
-
-        self.assert_units_equal(other)
-        return Number(self.value - other.value, self.unit)
-
-    def __mul__(self, other):
-        if type(other) == float or type(other) == int:
-            return Number(self.value * other, self.unit)
-
-        return Number(self.value * other.value, self.unit * other.unit)
-
-    def __truediv__(self, other):
-        if type(other) == float or type(other) == int:
-            return Number(self.value / other, self.unit)
-
-        return Number(self.value / other.value, self.unit / other.unit)
-
-    def __pow__(self, power):
-        return Number(self.value ** power, self.unit ** power)
-
-    def __lt__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value < other)
-
-        self.assert_units_equal(other)
-        return self.value < other.value
-
-    def __le__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value <= other)
-
-        self.assert_units_equal(other)
-        return self.value <= other.value
-
-    def __gt__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value > other)
-
-        self.assert_units_equal(other)
-        return self.value > other.value
-
-    def __ge__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return Number(self.value >= other)
-
-        self.assert_units_equal(other)
-        return self.value >= other.value
-
-    def __eq__(self, other):
-        if type(other) == float or type(other) == int and self.unit == Unit.NONE:
-            return values_are_equal(self.value, other)
-
-        self.assert_units_equal(other)
-        return values_are_equal(self.value, other.value)
-
-    def assert_units_equal(self, other):
-        if other.unit != self.unit:
-            raise Exception(f"Cannot run operation on values with units {self.unit} and {other.unit}.")
-
-    def __hash__(self):
-        return hash((self.value, self.unit))
-
-    def __str__(self):
-        return display_float(self.value) + " " + repr(self.unit)
-
-    def __repr__(self):
-        return self.__str__()
-
-
-Number.ZERO_NEWTON = Number(0, Unit.NEWTON)
-Number.ZERO_METERS = Number(0, Unit.METER)
-
-
 class PairOfValues:
-    def __init__(self, x: Number, y: Number):
+    def __init__(self, x, y):
         self.x = x
         self.y = y
 
     def __str__(self):
-        return f"({repr(self.x)}, {repr(self.y)})"
+        return f"({str(self.x)}, {str(self.y)})"
 
     def __repr__(self):
         return self.__str__()
 
     def __hash__(self):
-        return hash((self.x, self.y))
+        return hash((float(self.x), float(self.y)))
 
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
+        return values_are_equal(self.x, other.x) and values_are_equal(self.y, other.y)
 
 
 class Point(PairOfValues):
-    def __init__(self, x: Number, y: Number):
+    def __init__(self, x, y):
         super().__init__(x, y)
 
 
 class Vector(PairOfValues):
-    def __init__(self, x: Number, y: Number):
+    def __init__(self, x, y):
         super().__init__(x, y)
 
     @classmethod
-    def from_direction(cls, magnitude: Number, radians: float):
+    def from_direction(cls, magnitude, radians: float):
         """
-        :param magnitude: Number of radians from the positive x axis
+        :param magnitude of radians from the positive x axis
         :param radians:
         :return: The vector
         """
@@ -251,7 +84,7 @@ class Vector(PairOfValues):
         return self.dot_product(other) / (self.get_magnitude() * other.get_magnitude())
 
     def is_collinear(self, other):
-        value = abs(self.cos_theta(other).value)
+        value = abs(self.cos_theta(other))
         return values_are_equal(1, value)
 
     def __add__(self, other):
@@ -270,12 +103,44 @@ class Vector(PairOfValues):
 Vector.ZERO = Vector(0, 0)
 
 
+class HSSSet:
+    def __init__(self, name, key: int, color: str):
+        """
+
+        :param name:
+        :param key:
+        :param color: A color that is supported by tkinter
+        """
+        self.name = name
+        self.key = key
+        self.color = color
+
+    def __eq__(self, other):
+        return self.key == other.key
+
+    def __hash__(self):
+        return self.key
+
+
+class HSSSetProperties:
+    def __init__(self):
+        self.max_compression = 0
+        self.max_tension = 0
+        self.min_area = 0
+        self.min_i = 0
+
+
 class Beam:
     """
     A pair of points that represents a beam with the special property that the order of the pair does not matter
     """
 
     def __init__(self, joint1: Point, joint2: Point):
+        """
+        :param joint1: Position of one end of the beam
+        :param joint2: Position of the other end of the beam
+        :param hss_set: String representing the
+        """
         self.joint1: Point = joint1
         self.joint2: Point = joint2
 
@@ -295,58 +160,66 @@ class Beam:
     def get_direction_vector(self) -> Vector:
         return Vector.from_a_to_b(self.joint1, self.joint2)
 
-    def get_length(self) -> Number:
+    def get_length(self):
         return self.get_direction_vector().get_magnitude()
 
 
+class BeamProperties:
+    def __init__(self, hss_set: HSSSet):
+        self.hss_set = hss_set
+
+
 class BridgeData:
-    def __init__(self, beams: Set[Beam], support_joints: Set[Point], area_load: Number, width: Number):
+    def __init__(self, beams: Dict[Beam, BeamProperties], support_joints: Set[Point], area_load, width):
         """
         :param beams: A dictionary where each joint is a key and each joint points to a set of joints that is connected to the starting joint
         :param support_joints: A set where with the joints where there's an upward support
         """
-        self.beams: Set[Beam] = beams
+        self.beams: Dict[Beam, BeamProperties] = beams
         self.support_joints: Set[Point] = support_joints
         self.area_load = area_load
         self.width = width
 
 
 class BridgeFactory:
-    @staticmethod
-    def get_beams_for_equilateral_bridge(number_of_panels: int, span: Number):
-        beams = set()
-        side_length: Number = span / number_of_panels
+    def __init__(self):
+        self.hss_chord_set = HSSSet("Chords", 0, "red")
+        self.hss_web_set = HSSSet("Web", 1, "blue")
+
+    def get_beams_for_equilateral_bridge(self, number_of_panels: int, span):
+        beams = {}
+        side_length = span / number_of_panels
         height = side_length * math.sqrt(3) / 2
 
         previous_top_corner = None
 
         for i in range(number_of_panels):
             # Corners
-            left_corner = Point(side_length * i, Number(0, Unit.METER))
+            left_corner = Point(side_length * i, 0 * pq.m)
             top_corner = Point(side_length * (i + 0.5), height)
-            right_corner = Point(side_length * (i + 1), Number(0, Unit.METER))
+            right_corner = Point(side_length * (i + 1), 0 * pq.m)
 
-            beams.add(Beam(left_corner, right_corner))
-            beams.add(Beam(left_corner, top_corner))
-            beams.add(Beam(right_corner, top_corner))
+            beams[Beam(left_corner, right_corner)] = BeamProperties(self.hss_chord_set)
+
+            beams[Beam(left_corner, top_corner)] = BeamProperties(self.hss_web_set)
+            beams[Beam(right_corner, top_corner)] = BeamProperties(self.hss_web_set)
 
             if previous_top_corner is not None:
-                beams.add(Beam(previous_top_corner, top_corner))
+                beams[Beam(previous_top_corner, top_corner)] = BeamProperties(self.hss_chord_set)
 
             previous_top_corner = top_corner
 
         return beams
 
-    @staticmethod
-    def get_beams_for_right_angle_bridge(number_of_panels: int, span: Number, angle_ratio: float):
+    def get_beams_for_right_angle_bridge(self, number_of_panels: int, span, angle_ratio: float):
         """
         :param number_of_panels: The number of times the sequence repeats
         :param span: The span of the bridge
         :param angle_ratio: The height divided by the width of one panel
         """
-        beams = set()
+        beams = {}
 
-        chord_length: Number = span / number_of_panels
+        chord_length = span / number_of_panels
         height = chord_length * angle_ratio
 
         if number_of_panels % 2 == 1:
@@ -355,23 +228,23 @@ class BridgeFactory:
         for i in range(number_of_panels):
             top_left = Point(chord_length * i, height)
             top_right = Point(chord_length * (i + 1), height)
-            bottom_left = Point(chord_length * i, 0)
-            bottom_right = Point(chord_length * (i + 1), 0)
+            bottom_left = Point(chord_length * i, 0 * pq.m)
+            bottom_right = Point(chord_length * (i + 1), 0 * pq.m)
 
-            beams.add(Beam(bottom_left, bottom_right))
+            beams[Beam(bottom_left, bottom_right)] = BeamProperties(self.hss_chord_set)
 
             if i < number_of_panels / 2:
-                beams.add(Beam(bottom_left, top_right))
+                beams[Beam(bottom_left, top_right)] = BeamProperties(self.hss_web_set)
             else:
-                beams.add(Beam(top_left, bottom_right))
+                beams[Beam(top_left, bottom_right)] = BeamProperties(self.hss_web_set)
 
             if i == 0:
-                beams.add(Beam(bottom_right, top_right))
+                beams[Beam(bottom_right, top_right)] = BeamProperties(self.hss_web_set)
             elif i == number_of_panels - 1:
                 pass
             else:
-                beams.add(Beam(top_left, top_right))
-                beams.add(Beam(bottom_right, top_right))
+                beams[Beam(top_left, top_right)] = BeamProperties(self.hss_chord_set)
+                beams[Beam(bottom_right, top_right)] = BeamProperties(self.hss_web_set)
 
         return beams
 
@@ -386,13 +259,10 @@ class BridgeCalculator:
         self.data = bridge
         self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
         self.enclosing_rectangle: Optional[Tuple] = None  # x_min, y_min, x_max, y_max
-        self.member_forces: Dict[Beam, Optional[Number]] = {}
+        self.member_forces: Dict[Beam, Optional] = {}
         self.joints = {}
         self.external_forces = {}
-        self.max_compression = None
-        self.max_tension = None
-        self.minimum_area = None
-        self.minimum_i = None
+        self.hss_sets: Dict[HSSSet, HSSSetProperties] = {}
 
     def build_joint_map(self):
         # Build up joints
@@ -432,7 +302,7 @@ class BridgeCalculator:
                 dist_to_neighbouring_joints = (x_pos - load_bearing_joints_x_pos[i - 1])
 
             self.external_forces[
-                Point(x_pos, external_forces_y_pos)] = Vector(Number(0, Unit.NEWTON),
+                Point(x_pos, external_forces_y_pos)] = Vector(0 * pq.N,
                                                               dist_to_neighbouring_joints / -2 * self.load_per_unit_length)
 
         for i, x_pos in enumerate(supports_x_pos):
@@ -443,7 +313,7 @@ class BridgeCalculator:
             else:
                 dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
 
-            self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(Number(0, Unit.NEWTON),
+            self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(0 * pq.N,
                                                                                 dist_to_neighbouring_joints / 2 * self.load_per_unit_length)
 
     def get_enclosing_rectangle(self):
@@ -479,7 +349,7 @@ class BridgeCalculator:
                 if joint in calculated_joints:
                     continue
 
-                sum_of_forces = Vector(Number(0, Unit.NEWTON), Number(0, Unit.NEWTON))
+                sum_of_forces = Vector(0 * pq.N, 0 * pq.N)
                 unknown_opposing_joints = []
 
                 # Get forces in members
@@ -501,7 +371,7 @@ class BridgeCalculator:
 
                 # If all forces are known make sure sum is zero and you're done
                 elif len(unknown_opposing_joints) == 0:
-                    if sum_of_forces != Vector(Number(0, Unit.NEWTON), Number(0, Unit.NEWTON)):
+                    if sum_of_forces != Vector(0, 0):
                         print(f"ERROR: Sum of forces at joint, {joint}, is {sum_of_forces} not (0, 0).")
                     calculated_joints.add(joint)
 
@@ -510,7 +380,7 @@ class BridgeCalculator:
                     unknown_opposing_joint = unknown_opposing_joints[0]
                     direction_vector = Vector.from_a_to_b(joint, unknown_opposing_joint)
 
-                    if sum_of_forces == Vector(Number(0, Unit.NEWTON), Number(0, Unit.NEWTON)):
+                    if sum_of_forces == Vector(0, 0):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = 0
                     elif sum_of_forces.is_collinear(direction_vector):
                         self.member_forces[Beam(unknown_opposing_joint, joint)] = sum_of_forces.cos_theta(
@@ -559,28 +429,32 @@ class BridgeCalculator:
 
             passes += 1
 
-    def get_highest_member_forces(self):
-        self.max_compression = Number(0, Unit.NEWTON)
-        self.max_tension = Number(0, Unit.NEWTON)
-        for force in self.member_forces.values():
-            self.max_compression = min(force, self.max_compression)
-            self.max_tension = max(force, self.max_tension)
-
-        return self.max_compression, self.max_tension
-
-    def get_minimum_area_and_i(self):
-        self.minimum_area = max(self.max_tension,
-                                (self.max_compression ** 2) ** 0.5) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS
-
-        self.minimum_i = Number(0, Unit.METER ** 4)
+    def calculate_highest_member_forces(self):
         for beam, force in self.member_forces.items():
-            if force < Number(0, Unit.NEWTON):  # Compression
-                i = (force ** 2) ** 0.5 * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (YOUNG_MODULUS *
-                                                                                                  (math.pi ** 2))
-                if i > self.minimum_i:
-                    self.minimum_i = i
+            current_hss_set = self.data.beams[beam].hss_set
+            if current_hss_set not in self.hss_sets:
+                self.hss_sets[current_hss_set] = HSSSetProperties()
 
-        return self.minimum_area, self.minimum_i
+            if force > 0:
+                self.hss_sets[current_hss_set].max_tension = max(self.hss_sets[current_hss_set].max_tension, force)
+
+            elif force < 0:
+                self.hss_sets[current_hss_set].max_compression = min(self.hss_sets[current_hss_set].max_compression,
+                                                                     force)
+
+    def calculate_min_area_and_i(self):
+        for hss_property in self.hss_sets.values():
+            hss_property.min_area = max(hss_property.min_area,
+                                        abs(hss_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS
+
+        for beam, force in self.member_forces.items():
+            if force < 0:
+                current_hss_set = self.data.beams[beam].hss_set
+
+                # Compression
+                i = abs(force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (YOUNG_MODULUS *
+                                                                                         (math.pi ** 2))
+                self.hss_sets[current_hss_set].min_i = max(self.hss_sets[current_hss_set].min_i, i)
 
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):
@@ -633,16 +507,16 @@ class BridgeGUI:
         self.height = (vertical_span * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING) * 2
         width = horizontal_span * self.scale_factor + 2 * BridgeGUI.CANVAS_PADDING
 
-        self.canvas = tkinter.Canvas(self.top, height=self.height, width=width)
+        self.canvas = tkinter.Canvas(self.top, height=float(self.height), width=float(width))
 
     def draw_beams(self, bridge: BridgeCalculator):
         for beam, force in bridge.member_forces.items():
-            self.canvas.create_line(self.scale_x(beam.joint1.x), self.scale_y(beam.joint1.y),
-                                    self.scale_x(beam.joint2.x), self.scale_y(beam.joint2.y))
+            self.draw_line(self.scale_point(beam.joint1), self.scale_point(beam.joint2),
+                           color=bridge.data.beams[beam].hss_set.color)
             if force is not None:
                 label_position = Vector.from_point(self.scale_point(beam.joint2)) + BridgeGUI.flip_vector_on_y(
                     Vector.from_a_to_b(beam.joint2, beam.joint1)) / 2 * self.scale_factor
-                self.draw_label(label_position, force.value)
+                self.draw_label(label_position, force.rescale(kN))
 
     def draw_external_forces(self, bridge: BridgeCalculator):
         for joint, force in bridge.external_forces.items():
@@ -661,14 +535,16 @@ class BridgeGUI:
         label_position = vector_tail + unscaled_vector_to_draw * BridgeGUI.LENGTH_TO_LABEL
 
         self.draw_line(vector_tail, vector_tip, arrow=True)
-        self.draw_label(label_position, vector.get_magnitude().value)
+        self.draw_label(label_position, vector.get_magnitude().rescale(kN))
 
     def draw_label(self, position: Vector, content: float):
-        tkinter.Label(self.canvas, text=display_float(content)).place(x=position.x.value - BridgeGUI.WIDTH_OF_LABEL,
-                                                                      y=position.y.value - BridgeGUI.HEIGHT_OF_LABEL)
+        tkinter.Label(self.canvas, text=display_float(content)).place(
+            x=float(position.x.simplified - BridgeGUI.WIDTH_OF_LABEL),
+            y=float(position.y.simplified - BridgeGUI.HEIGHT_OF_LABEL))
 
-    def draw_line(self, a: PairOfValues, b: PairOfValues, arrow=False):
-        self.canvas.create_line(a.x, a.y, b.x, b.y, arrow=tkinter.LAST if arrow else None)
+    def draw_line(self, a: PairOfValues, b: PairOfValues, arrow=False, color=None):
+        self.canvas.create_line(float(a.x.simplified), float(a.y.simplified), float(b.x.simplified),
+                                float(b.y.simplified), arrow=tkinter.LAST if arrow else None, fill=color)
 
     def add_information(self, information: str):
         x_pos = BridgeGUI.CANVAS_PADDING + BridgeGUI.INFORMATION_Y_SPACING * (
@@ -699,21 +575,24 @@ if __name__ == "__main__":
     TOLERANCE = 10 ** -8  # Used when checking if floats are equal
     FACTOR_OF_SAFETY_BUCKLING = 3
     FACTOR_OF_SAFETY_YIELDING = 2
-    YIELD_STRESS = Number(350 / 10 ** 6, Unit.NEWTON / Unit.METER ** 2)  # MPa
-    YOUNG_MODULUS = Number(200000 / 10 ** 6, Unit.NEWTON / Unit.METER ** 2)
+    YIELD_STRESS = 350 * pq.MPa
+    YOUNG_MODULUS = 200000 * pq.MPa
+    pq.set_default_units(length="mm")
+    kN = pq.UnitQuantity("kiloNewton", pq.N * 1000, "kN")
 
     # Bridge constants
-    AREA_LOAD = Number((5 + 1 + 0.75) * 10 ** 3, Unit.NEWTON / Unit.METER ** 2)
-    WIDTH = Number(3.7, Unit.METER)
-    SPAN = Number(107.96 / 3, Unit.METER)
+    AREA_LOAD = (5 + 1 + 0.75) * kN / pq.m ** 2
+    WIDTH = 3.7 * pq.m
+    SPAN = 107.96 / 3 * pq.m
     HEIGHT_WIDTH_RATIO = 4 / 3
     NUMBER_OF_PANELS = 8
 
-    myBeams = BridgeFactory.get_beams_for_equilateral_bridge(NUMBER_OF_PANELS, SPAN)
-    # beams = BridgeFactory.get_beams_for_right_angle_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+    bridge_factory = BridgeFactory()
+    myBeams = bridge_factory.get_beams_for_equilateral_bridge(NUMBER_OF_PANELS, SPAN)
+    beams = bridge_factory.get_beams_for_right_angle_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
     supports = {
-        Point(Number.ZERO_METERS, Number.ZERO_METERS),
-        Point(SPAN, Number.ZERO_METERS)
+        Point(0 * pq.m, 0 * pq.m),
+        Point(SPAN, 0 * pq.m)
     }
     myBridge = BridgeData(myBeams, supports, AREA_LOAD, WIDTH)
     # BridgeFactory.add_supports_to_bridge(myBridge, {Point(SPAN/2, 0)})
@@ -721,22 +600,24 @@ if __name__ == "__main__":
     bridge_calculator = BridgeCalculator(myBridge)
     bridge_calculator.build_joint_map()
     bridge_calculator.calculate_member_forces()
-    (max_compression, max_tension) = bridge_calculator.get_highest_member_forces()
-    (minimum_area, minimum_i) = bridge_calculator.get_minimum_area_and_i()
-
-    minimum_area *= 1000
-    minimum_i *= 10 ** 3  # Since meters and kN go to mm and N and then displayed as 10^6
+    bridge_calculator.calculate_highest_member_forces()
+    bridge_calculator.calculate_min_area_and_i()
 
     GUI = BridgeGUI()
     GUI.draw_bridge(bridge_calculator)
 
-    GUI.add_information(f"Area Load: {AREA_LOAD}")
-    GUI.add_information(f"Width: 3.70m")
-    GUI.add_information(f"Span: {SPAN}")
-    GUI.add_information(f"Height/Width ratio: {HEIGHT_WIDTH_RATIO}")
-    GUI.add_information(f"Max compression: {max_compression}")
-    GUI.add_information(f"Max tension: {max_tension}")
-    GUI.add_information(f"Minimum area: {minimum_area}")
-    GUI.add_information(f"Minimum I: {minimum_i}")
+    GUI.add_information(f"Area Load: {display_float(AREA_LOAD)}")
+    GUI.add_information(f"Width: {display_float(WIDTH)}")
+    GUI.add_information(f"Span: {display_float(SPAN)}")
+    GUI.add_information(f"Height/Width ratio: {display_float(HEIGHT_WIDTH_RATIO)}")
+
+    for hss_set, property in bridge_calculator.hss_sets.items():
+        GUI.add_information(f"{hss_set.name} ({hss_set.color}): Minimum area: {display_float(property.min_area.rescale('mm**2'))}")
+        GUI.add_information(f"{hss_set.name} ({hss_set.color}): Minimum I: {display_float(property.min_i.rescale('mm**4') / 10 ** 6)}*10**6")
+
+    # GUI.add_information(f"Max compression: {display_float(max_compression.rescale(kN))}")
+    # GUI.add_information(f"Max tension: {display_float(max_tension.rescale(kN))}")
+    # GUI.add_information(f"Minimum area: {display_float(minimum_area.rescale('mm**2'))}")
+    # GUI.add_information(f"Minimum I: {display_float(minimum_i / 10 ** 6)}*10**6")
 
     GUI.display()
