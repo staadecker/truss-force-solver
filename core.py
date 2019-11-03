@@ -321,9 +321,10 @@ class LoadApplier:
             else:
                 dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
 
-            self.bridge.joints[Point(x_pos, external_forces_y_pos)].external_force += Vector(0 * pq.N,
-                                                                                             dist_to_neighbouring_joints / 2
-                                                                                             * load_per_unit_length)
+            self.bridge.joints[Point(x_pos, external_forces_y_pos)] \
+                .external_force += Vector(0 * pq.N,
+                                          dist_to_neighbouring_joints / 2
+                                          * load_per_unit_length)
 
     def add_point_load(self, loaded_joint: Point, load_force: float):
         """
@@ -507,8 +508,9 @@ class BridgeCalculator:
     def calculate_min_area_and_i(self):
         for beam_group_property in self.beam_groups.values():
             beam_group_property.min_area = max(beam_group_property.min_area,
-                                               max(beam_group_property.max_tension, abs(
-                                                   beam_group_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS)
+                                               max(beam_group_property.max_tension,
+                                                   abs(beam_group_property.max_compression))
+                                               * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS)
 
         for beam, beam_property in self.bridge.beams.items():
             if beam_property.member_force is not None:
@@ -523,6 +525,16 @@ class BridgeCalculator:
 
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):
+        """
+        Returns the forces that are scalar multiples of unknown1 and unknown2 and add to sum_of_forces.
+
+        In long, the function finds the solution to the following problem.
+        Find force 1 and force 2 if
+         - Force 1 and force 2 are scalar multiples of unknown1 and unknown 2.
+         - Force 1 and force 2 have a sum of sum_of_forces
+
+        Solving the vector equation on paper produces the equations used below
+        """
         a = sum_of_forces.x
         b = sum_of_forces.y
         c = unknown1.x
