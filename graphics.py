@@ -54,7 +54,7 @@ class BridgeGUI:
                 self.draw_label(label_position, beam_property.member_force.rescale(kN))
 
     def draw_external_forces(self, bridge: BridgeCalculator):
-        for joint, force in bridge.external_forces.items():
+        for joint, force in bridge.bridge.joint_loads.items():
             self.draw_vector(force, joint)
 
     def display(self):

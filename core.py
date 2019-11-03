@@ -2,8 +2,8 @@ import math
 import quantities as pq
 from typing import Dict, Tuple, Set, Optional
 
-from utilities import Point, Vector, FACTOR_OF_SAFETY_YIELDING, FACTOR_OF_SAFETY_BUCKLING, YOUNG_MODULUS, YIELD_STRESS, \
-    kN
+from utilities import Point, Vector, FACTOR_OF_SAFETY_YIELDING, FACTOR_OF_SAFETY_BUCKLING, YOUNG_MODULUS, \
+    YIELD_STRESS, kN
 
 """Limitations in bridge:
 - One joint cannot have two beams going in the same direction.
@@ -87,15 +87,28 @@ class BeamProperties:
 
 
 class BridgeData:
-    def __init__(self, beams: Dict[Beam, BeamProperties], support_joints: Set[Point], area_load, width):
+    def __init__(self, beams: Dict[Beam, BeamProperties]):
         """
         :param beams: A dictionary containing all beams and there respective properties
-        :param support_joints: A set with the joints where there's a support that applies a vertical force
         """
         self.beams: Dict[Beam, BeamProperties] = beams
-        self.support_joints: Set[Point] = support_joints
-        self.area_load = area_load
-        self.width = width
+
+        self.joints: Dict[Point, Set[Point]] = {}
+        self.build_joint_map()
+
+        self.joint_loads: Dict[Point, Vector] = {}
+
+    def build_joint_map(self):
+        # For each beam, add joint connection to joint map
+        for beam in self.beams:
+            if beam.joint1 not in self.joints:
+                self.joints[beam.joint1] = set()
+
+            if beam.joint2 not in self.joints:
+                self.joints[beam.joint2] = set()
+
+            self.joints[beam.joint1].add(beam.joint2)
+            self.joints[beam.joint2].add(beam.joint1)
 
 
 class BridgeFactory:
@@ -129,7 +142,7 @@ class BridgeFactory:
 
         return beams
 
-    def get_beams_for_right_angle_bridge(self, number_of_panels: int, span, angle_ratio: float):
+    def get_beams_for_howe_bridge(self, number_of_panels: int, span, angle_ratio: float):
         """
         :param number_of_panels: The number of times the sequence repeats
         :param span: The span of the bridge
@@ -236,8 +249,11 @@ class BridgeFactory:
 
             # Vertical beam
             if i != 0:
-                beams[Beam(bottom_left, mid_left)] = BeamProperties(self.hss_web_set)
-                beams[Beam(mid_left, top_left)] = BeamProperties(self.hss_web_set)
+                if i != number_of_panels / 2:
+                    beams[Beam(bottom_left, mid_left)] = BeamProperties(self.hss_web_set)
+                    beams[Beam(mid_left, top_left)] = BeamProperties(self.hss_web_set)
+                else:
+                    beams[Beam(bottom_left, top_left)] = BeamProperties(self.hss_web_set)
 
             # Top chord
             if i != 0 and i != number_of_panels - 1:
@@ -258,47 +274,20 @@ class BridgeFactory:
         return beams
 
     @staticmethod
-    def add_supports_to_bridge(bridge: BridgeData, supports: Set[Point]):
-        for support in supports:
-            bridge.support_joints.add(support)
-
-
-class BridgeCalculator:
-    def __init__(self, bridge: BridgeData):
-        self.bridge = bridge
-        self.enclosing_rectangle: Optional[Tuple] = None  # (x_min, y_min, x_max, y_max)
-        self.joints = {}  # A mapping of joints to a set of connected joints
-        self.external_forces = {}
-        self.beam_groups: Dict[BeamGroup, BeamGroupProperties] = {}
-        self.load_per_unit_length = bridge.area_load * bridge.width / 2  # Divide by two since trusses are on both sides
-
-        self.build_joint_map()
-
-    def build_joint_map(self):
-        # For each beam, add joint connection to joint map
-        for beam in self.bridge.beams:
-            if beam.joint1 not in self.joints:
-                self.joints[beam.joint1] = set()
-
-            if beam.joint2 not in self.joints:
-                self.joints[beam.joint2] = set()
-
-            self.joints[beam.joint1].add(beam.joint2)
-            self.joints[beam.joint2].add(beam.joint1)
-
-    def calculate_external_forces(self):
+    def add_uniformly_distributed_load(bridge, load_per_unit_length, support_joints: Set[Point]):
         external_forces_y_pos = None
 
-        for support in self.bridge.support_joints:
+        for support in support_joints:
             external_forces_y_pos = support.y
+            break
 
         load_bearing_joints_x_pos = []
-        for joint in self.joints:
+        for joint in bridge.joints:
             if joint.y == external_forces_y_pos:
                 load_bearing_joints_x_pos.append(joint.x)
 
         load_bearing_joints_x_pos = sorted(load_bearing_joints_x_pos)
-        supports_x_pos = sorted([support.x for support in self.bridge.support_joints])
+        supports_x_pos = sorted([support.x for support in support_joints])
 
         # Loop from left to right throughout the joints
         for i, x_pos in enumerate(load_bearing_joints_x_pos):
@@ -309,10 +298,10 @@ class BridgeCalculator:
             else:
                 dist_to_neighbouring_joints = (x_pos - load_bearing_joints_x_pos[i - 1])
 
-            self.external_forces[
+            bridge.joint_loads[
                 Point(x_pos, external_forces_y_pos)] = Vector(0 * pq.N,
                                                               dist_to_neighbouring_joints / -2
-                                                              * self.load_per_unit_length)
+                                                              * load_per_unit_length)
 
         for i, x_pos in enumerate(supports_x_pos):
             if i == 0:
@@ -322,16 +311,72 @@ class BridgeCalculator:
             else:
                 dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
 
-            self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(0 * pq.N,
-                                                                                dist_to_neighbouring_joints / 2
-                                                                                * self.load_per_unit_length)
+            bridge.joint_loads[Point(x_pos, external_forces_y_pos)] += Vector(0 * pq.N,
+                                                                              dist_to_neighbouring_joints / 2
+                                                                              * load_per_unit_length)
+
+    @staticmethod
+    def add_point_load(bridge, loaded_joint: Point, supports, load_force: float):
+        """
+        Joint load must be applied between two supports
+        """
+
+        external_forces_y_pos = None
+        for support in supports:
+            external_forces_y_pos = support.y
+            break
+
+        if external_forces_y_pos != loaded_joint.y:
+            raise Exception("Joint load is not horizontally inline with supports.")
+
+        supports_x_pos = sorted([support.x for support in supports])
+        for i, x_pos in enumerate(supports_x_pos):
+            left_neighbour = None if i == 0 else supports_x_pos[i - 1]
+            right_neighbour = None if i == len(supports_x_pos) - 1 else supports_x_pos[i + 1]
+
+            # If outside of neighbours, no weight on me
+            if left_neighbour is not None and loaded_joint.x <= left_neighbour:
+                continue
+            if right_neighbour is not None and loaded_joint.x >= right_neighbour:
+                continue
+
+            # Between current joint and right joint
+            if loaded_joint.x > x_pos:
+                if right_neighbour is None:
+                    raise Exception(
+                        "Joint load seems to be applied to the right of all supports. Must be between supports")
+
+                reaction_force = load_force * (loaded_joint.x - x_pos) / (right_neighbour - x_pos)
+                bridge.joint_loads[Point(x_pos, loaded_joint.y)] = Vector(0 * kN, reaction_force)
+
+            # Between current joint and right joint
+            elif loaded_joint.x < x_pos:
+                if left_neighbour is None:
+                    raise Exception(
+                        "Joint load seems to be applied to the left of all supports. Must be between supports.")
+
+                reaction_force = load_force * (x_pos - loaded_joint.x) / (x_pos - left_neighbour)
+                bridge.joint_loads[Point(x_pos, loaded_joint.y)] = Vector(0 * kN, reaction_force)
+
+            else:
+                bridge.joint_loads[Point(x_pos, loaded_joint.y)] = Vector(0 * kN, load_force)
+
+        bridge.joint_loads[loaded_joint] = Vector(0* kN, -load_force)
+
+
+
+class BridgeCalculator:
+    def __init__(self, bridge: BridgeData):
+        self.bridge = bridge
+        self.enclosing_rectangle: Optional[Tuple] = None  # (x_min, y_min, x_max, y_max)
+        self.beam_groups: Dict[BeamGroup, BeamGroupProperties] = {}
 
     def get_enclosing_rectangle(self):
         if self.enclosing_rectangle is not None:
             return self.enclosing_rectangle
 
         (min_x, min_y, max_x, max_y) = (None, None, None, None)
-        for joint in self.joints.keys():
+        for joint in self.bridge.joints.keys():
             min_x = min(joint.x, min_x) if min_x is not None else joint.x
             min_y = min(joint.y, min_y) if min_y is not None else joint.y
 
@@ -342,11 +387,6 @@ class BridgeCalculator:
         return self.enclosing_rectangle
 
     def calculate_member_forces(self):
-        if len(self.joints) == 0:
-            self.build_joint_map()
-
-        if len(self.external_forces) == 0:
-            self.calculate_external_forces()
 
         # Loop through every joint repeatedly.
         # At each joint look for member forces + external forces + joint load
@@ -354,8 +394,8 @@ class BridgeCalculator:
         # Repeat for other joints
         passes = 0
         calculated_joints = set()
-        while passes < len(self.joints) * 2 and len(calculated_joints) < len(self.joints):
-            for joint, opposing_joints in self.joints.items():
+        while passes < len(self.bridge.joints) * 2 and len(calculated_joints) < len(self.bridge.joints):
+            for joint, opposing_joints in self.bridge.joints.items():
                 if joint in calculated_joints:
                     continue
 
@@ -373,8 +413,8 @@ class BridgeCalculator:
                         sum_of_forces += direction_vector.get_unit_vector() * member_force
 
                 # Get external forces
-                if joint in self.external_forces:
-                    sum_of_forces += self.external_forces[joint]
+                if joint in self.bridge.joint_loads:
+                    sum_of_forces += self.bridge.joint_loads[joint]
 
                 if len(unknown_opposing_joints) > 3:
                     continue
@@ -450,7 +490,7 @@ class BridgeCalculator:
             if beam_property.member_force is not None:
                 if beam_property.member_force > 0:
                     self.beam_groups[current_hss_set].max_tension = max(self.beam_groups[current_hss_set].max_tension,
-                                                                    beam_property.member_force)
+                                                                        beam_property.member_force)
 
                 elif beam_property.member_force < 0:
                     self.beam_groups[current_hss_set].max_compression = min(
