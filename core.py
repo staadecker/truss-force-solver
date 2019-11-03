@@ -77,7 +77,7 @@ class BeamGroupProperties:
         self.max_compression = 0 * kN
         self.max_tension = 0 * kN
         self.min_area = 0 * pq.mm ** 2  # Minimum area of HSS beams such that yielding does not occur
-        self.min_i = 0 * pq.mm ** 4  # Minimum second moment of inertia of beams such that buckling does not occur (compression only)
+        self.min_i = 0 * pq.mm ** 4  # Minimum second moment of inertia of beams such that buckling does not occur
 
 
 class BeamProperties:
@@ -163,6 +163,97 @@ class BridgeFactory:
             else:
                 beams[Beam(top_left, top_right)] = BeamProperties(self.hss_top_chord_set)
                 beams[Beam(bottom_right, top_right)] = BeamProperties(self.hss_web_set)
+
+        return beams
+
+    def get_beams_for_pratt_bridge(self, number_of_panels: int, span, angle_ratio: float):
+        """
+        :param number_of_panels: The number of times the sequence repeats
+        :param span: The span of the bridge
+        :param angle_ratio: The height divided by the width of one panel
+        """
+        beams = {}
+
+        chord_length = span / number_of_panels
+        height = chord_length * angle_ratio
+
+        if number_of_panels % 2 == 1:
+            raise Exception("Uneven number of panels. Can't build beams.")
+
+        for i in range(number_of_panels):
+            top_left = Point(chord_length * i, height)
+            top_right = Point(chord_length * (i + 1), height)
+            bottom_left = Point(chord_length * i, 0 * pq.m)
+            bottom_right = Point(chord_length * (i + 1), 0 * pq.m)
+
+            # Bottom chord
+            beams[Beam(bottom_left, bottom_right)] = BeamProperties(self.hss_bottom_chord_set)
+
+            # Vertical beam
+            if i != 0:
+                beams[Beam(bottom_left, top_left)] = BeamProperties(self.hss_web_set)
+
+            # Top chord
+            if i != 0 and i != number_of_panels - 1:
+                beams[Beam(top_left, top_right)] = BeamProperties(self.hss_top_chord_set)
+
+            # Slanted beams
+            if i == 0:
+                beams[Beam(bottom_left, top_right)] = BeamProperties(self.hss_web_set)
+            elif i < number_of_panels / 2:
+                beams[Beam(top_left, bottom_right)] = BeamProperties(self.hss_web_set)
+            elif i < number_of_panels - 1:
+                beams[Beam(top_right, bottom_left)] = BeamProperties(self.hss_web_set)
+            else:
+                beams[Beam(top_left, bottom_right)] = BeamProperties(self.hss_web_set)
+
+        return beams
+
+    def get_beams_for_k_bridge(self, number_of_panels: int, span, angle_ratio: float):
+        """
+        :param number_of_panels: The number of times the sequence repeats
+        :param span: The span of the bridge
+        :param angle_ratio: The height divided by the width of one panel
+        """
+        beams = {}
+
+        chord_length = span / number_of_panels
+        height = chord_length * angle_ratio
+
+        if number_of_panels % 2 == 1:
+            raise Exception("Uneven number of panels. Can't build beams.")
+
+        for i in range(number_of_panels):
+            top_left = Point(chord_length * i, height)
+            top_right = Point(chord_length * (i + 1), height)
+            bottom_left = Point(chord_length * i, 0 * pq.m)
+            bottom_right = Point(chord_length * (i + 1), 0 * pq.m)
+            mid_left = Point(chord_length * i, height / 2)
+            mid_right = Point(chord_length * (i + 1), height / 2)
+
+            # Bottom chord
+            beams[Beam(bottom_left, bottom_right)] = BeamProperties(self.hss_bottom_chord_set)
+
+            # Vertical beam
+            if i != 0:
+                beams[Beam(bottom_left, mid_left)] = BeamProperties(self.hss_web_set)
+                beams[Beam(mid_left, top_left)] = BeamProperties(self.hss_web_set)
+
+            # Top chord
+            if i != 0 and i != number_of_panels - 1:
+                beams[Beam(top_left, top_right)] = BeamProperties(self.hss_top_chord_set)
+
+            # Slanted beams
+            if i == 0:
+                beams[Beam(bottom_left, top_right)] = BeamProperties(self.hss_web_set)
+            elif i < number_of_panels / 2:
+                beams[Beam(mid_left, top_right)] = BeamProperties(self.hss_web_set)
+                beams[Beam(mid_left, bottom_right)] = BeamProperties(self.hss_web_set)
+            elif i < number_of_panels - 1:
+                beams[Beam(mid_right, top_left)] = BeamProperties(self.hss_web_set)
+                beams[Beam(mid_right, bottom_left)] = BeamProperties(self.hss_web_set)
+            else:
+                beams[Beam(top_left, bottom_right)] = BeamProperties(self.hss_web_set)
 
         return beams
 
@@ -356,14 +447,15 @@ class BridgeCalculator:
             if current_hss_set not in self.beam_groups:
                 self.beam_groups[current_hss_set] = BeamGroupProperties()
 
-            if beam_property.member_force > 0:
-                self.beam_groups[current_hss_set].max_tension = max(self.beam_groups[current_hss_set].max_tension,
+            if beam_property.member_force is not None:
+                if beam_property.member_force > 0:
+                    self.beam_groups[current_hss_set].max_tension = max(self.beam_groups[current_hss_set].max_tension,
                                                                     beam_property.member_force)
 
-            elif beam_property.member_force < 0:
-                self.beam_groups[current_hss_set].max_compression = min(
-                    self.beam_groups[current_hss_set].max_compression,
-                    beam_property.member_force)
+                elif beam_property.member_force < 0:
+                    self.beam_groups[current_hss_set].max_compression = min(
+                        self.beam_groups[current_hss_set].max_compression,
+                        beam_property.member_force)
 
     def calculate_min_area_and_i(self):
         for beam_group_property in self.beam_groups.values():
@@ -372,14 +464,15 @@ class BridgeCalculator:
                                                    beam_group_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS)
 
         for beam, beam_property in self.bridge.beams.items():
-            if beam_property.member_force < 0:
-                current_hss_set = self.bridge.beams[beam].beam_group
+            if beam_property.member_force is not None:
+                if beam_property.member_force < 0:
+                    current_hss_set = self.bridge.beams[beam].beam_group
 
-                # Compression
-                i = abs(beam_property.member_force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (
-                        YOUNG_MODULUS *
-                        (math.pi ** 2))
-                self.beam_groups[current_hss_set].min_i = max(self.beam_groups[current_hss_set].min_i, i)
+                    # Compression
+                    i = abs(beam_property.member_force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (
+                            YOUNG_MODULUS *
+                            (math.pi ** 2))
+                    self.beam_groups[current_hss_set].min_i = max(self.beam_groups[current_hss_set].min_i, i)
 
     @staticmethod
     def solve_for_two_unknowns(sum_of_forces, unknown1, unknown2):

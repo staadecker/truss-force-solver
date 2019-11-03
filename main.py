@@ -12,8 +12,8 @@ if __name__ == "__main__":
     NUMBER_OF_PANELS = 8
 
     bridge_factory = BridgeFactory()
-    myBeams = bridge_factory.get_beams_for_equilateral_bridge(NUMBER_OF_PANELS, SPAN)
-    beams = bridge_factory.get_beams_for_right_angle_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+    myBeams = bridge_factory.get_beams_for_k_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+    beams = bridge_factory.get_beams_for_pratt_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
     supports = {
         Point(0 * pq.m, 0 * pq.m),
         Point(SPAN, 0 * pq.m)
