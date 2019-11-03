@@ -88,8 +88,8 @@ class BeamGroupProperties:
 
 class JointProperties:
     def __init__(self):
-        self.connected_joints: Set[Point] = set()
-        self.external_force: Optional[Vector] = None
+        self.connected_joints: Set[Point] = set()  # Set of all the joints that are connected by a beam to that joint
+        self.external_force: Optional[Vector] = None  # Sum of external forces acting on the joint
 
 
 class BridgeData:
@@ -100,6 +100,7 @@ class BridgeData:
         self.beams: Dict[Beam, BeamProperties] = beams
 
         self.joints: Dict[Point, JointProperties] = {}
+
         self.build_joint_map()
 
     def build_joint_map(self):
@@ -277,21 +278,26 @@ class BridgeFactory:
 
         return beams
 
-    @staticmethod
-    def add_uniformly_distributed_load(bridge, load_per_unit_length, support_joints: Set[Point]):
+
+class LoadApplier:
+    def __init__(self, bridge, supports):
+        self.bridge: BridgeData = bridge
+        self.supports: Set[Point] = supports
+
+    def add_uniformly_distributed_load(self, load_per_unit_length):
         external_forces_y_pos = None
 
-        for support in support_joints:
+        for support in self.supports:
             external_forces_y_pos = support.y
             break
 
         load_bearing_joints_x_pos = []
-        for joint in bridge.joints:
+        for joint in self.bridge.joints:
             if joint.y == external_forces_y_pos:
                 load_bearing_joints_x_pos.append(joint.x)
 
         load_bearing_joints_x_pos = sorted(load_bearing_joints_x_pos)
-        supports_x_pos = sorted([support.x for support in support_joints])
+        supports_x_pos = sorted([support.x for support in self.supports])
 
         # Loop from left to right throughout the joints
         for i, x_pos in enumerate(load_bearing_joints_x_pos):
@@ -302,7 +308,7 @@ class BridgeFactory:
             else:
                 dist_to_neighbouring_joints = (x_pos - load_bearing_joints_x_pos[i - 1])
 
-            bridge.joints[
+            self.bridge.joints[
                 Point(x_pos, external_forces_y_pos)].external_force = Vector(0 * pq.N,
                                                                              dist_to_neighbouring_joints / -2
                                                                              * load_per_unit_length)
@@ -315,25 +321,24 @@ class BridgeFactory:
             else:
                 dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
 
-            bridge.joints[Point(x_pos, external_forces_y_pos)].external_force += Vector(0 * pq.N,
-                                                                                        dist_to_neighbouring_joints / 2
-                                                                                        * load_per_unit_length)
+            self.bridge.joints[Point(x_pos, external_forces_y_pos)].external_force += Vector(0 * pq.N,
+                                                                                             dist_to_neighbouring_joints / 2
+                                                                                             * load_per_unit_length)
 
-    @staticmethod
-    def add_point_load(bridge, loaded_joint: Point, supports, load_force: float):
+    def add_point_load(self, loaded_joint: Point, load_force: float):
         """
         Joint load must be applied between two supports
         """
 
         external_forces_y_pos = None
-        for support in supports:
+        for support in self.supports:
             external_forces_y_pos = support.y
             break
 
         if external_forces_y_pos != loaded_joint.y:
             raise Exception("Joint load is not horizontally inline with supports.")
 
-        supports_x_pos = sorted([support.x for support in supports])
+        supports_x_pos = sorted([support.x for support in self.supports])
         for i, x_pos in enumerate(supports_x_pos):
             left_neighbour = None if i == 0 else supports_x_pos[i - 1]
             right_neighbour = None if i == len(supports_x_pos) - 1 else supports_x_pos[i + 1]
@@ -351,7 +356,7 @@ class BridgeFactory:
                         "Joint load seems to be applied to the right of all supports. Must be between supports")
 
                 reaction_force = load_force * (loaded_joint.x - x_pos) / (right_neighbour - x_pos)
-                bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, reaction_force)
+                self.bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, reaction_force)
 
             # Between current joint and right joint
             elif loaded_joint.x < x_pos:
@@ -360,12 +365,12 @@ class BridgeFactory:
                         "Joint load seems to be applied to the left of all supports. Must be between supports.")
 
                 reaction_force = load_force * (x_pos - loaded_joint.x) / (x_pos - left_neighbour)
-                bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, reaction_force)
+                self.bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, reaction_force)
 
             else:
-                bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, load_force)
+                self.bridge.joints[Point(x_pos, loaded_joint.y)].external_force = Vector(0 * kN, load_force)
 
-        bridge.joints[loaded_joint].external_force = Vector(0 * kN, -load_force)
+        self.bridge.joints[loaded_joint].external_force = Vector(0 * kN, -load_force)
 
 
 class BridgeCalculator:

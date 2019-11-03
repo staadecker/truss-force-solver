@@ -1,4 +1,4 @@
-from core import BridgeFactory, BridgeCalculator, BridgeData
+from core import BridgeFactory, BridgeCalculator, BridgeData, LoadApplier
 from utilities import Point, display_float, kN
 import quantities as pq
 from graphics import BridgeGUI
@@ -11,16 +11,22 @@ if __name__ == "__main__":
     HEIGHT_WIDTH_RATIO = 1
     NUMBER_OF_PANELS = 8
 
-    bridge_factory = BridgeFactory()
-    myBeams = bridge_factory.get_beams_for_k_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
-    supports = {
+    SUPPORTS = {
         Point(0 * pq.m, 0 * pq.m),
         Point(SPAN, 0 * pq.m)
     }
-    myBridge = BridgeData(myBeams)
-    # BridgeFactory.add_uniformly_distributed_load(myBridge, AREA_LOAD * WIDTH / 2, supports)
-    BridgeFactory.add_point_load(myBridge, Point(SPAN / 2, 0 * pq.m), supports, 1 * kN)
-    bridge_calculator = BridgeCalculator(myBridge)
+
+    bridge_factory = BridgeFactory()
+
+    beams = bridge_factory.get_beams_for_k_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+
+    bridge = BridgeData(beams)
+
+    load_applier = LoadApplier(bridge, SUPPORTS)
+    # load_applier.add_point_load(Point(SPAN / 2, 0 * pq.m), 1 * kN)
+    load_applier.add_uniformly_distributed_load(AREA_LOAD * WIDTH / 2)
+
+    bridge_calculator = BridgeCalculator(bridge)
     bridge_calculator.calculate_member_forces()
     bridge_calculator.calculate_highest_member_forces()
     bridge_calculator.calculate_min_area_and_i()

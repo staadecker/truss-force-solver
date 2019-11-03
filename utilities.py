@@ -1,6 +1,7 @@
 import math
 import quantities as pq
 
+
 def values_are_equal(value_1, value_2) -> bool:
     float_1 = float(value_1)
     return float_1 - TOLERANCE <= float(value_2) <= float_1 + TOLERANCE
