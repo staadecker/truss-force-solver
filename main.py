@@ -18,8 +18,8 @@ if __name__ == "__main__":
         Point(SPAN, 0 * pq.m)
     }
     myBridge = BridgeData(myBeams)
-    BridgeFactory.add_uniformly_distributed_load(myBridge, AREA_LOAD * WIDTH / 2, supports)
-    # BridgeFactory.add_point_load(myBridge, Point(SPAN /2, 0 * pq.m), supports, 1 * kN)
+    # BridgeFactory.add_uniformly_distributed_load(myBridge, AREA_LOAD * WIDTH / 2, supports)
+    BridgeFactory.add_point_load(myBridge, Point(SPAN / 2, 0 * pq.m), supports, 1 * kN)
     bridge_calculator = BridgeCalculator(myBridge)
     bridge_calculator.calculate_member_forces()
     bridge_calculator.calculate_highest_member_forces()
