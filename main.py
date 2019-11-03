@@ -34,10 +34,10 @@ if __name__ == "__main__":
     GUI.add_information(f"Span: {display_float(SPAN)}")
     GUI.add_information(f"Height/Width ratio: {display_float(HEIGHT_WIDTH_RATIO)}")
 
-    for hss_set, property in bridge_calculator.beam_groups.items():
+    for beam_group, beam_group_property in bridge_calculator.beam_groups.items():
         GUI.add_information(
-            f"{hss_set.name} ({hss_set.color}): Minimum area: {display_float(property.min_area.rescale('mm**2'))}")
-        GUI.add_information(f"{hss_set.name} ({hss_set.color}): Minimum I: "
-                            f"{display_float(property.min_i.rescale('mm**4') / 10 ** 6)}*10**6")
+            f"{beam_group.name} ({beam_group.color}): Minimum area: {display_float(beam_group_property.min_area.rescale('mm**2'))}")
+        GUI.add_information(f"{beam_group.name} ({beam_group.color}): Minimum I: "
+                            f"{display_float(beam_group_property.min_i.rescale('mm**4') / 10 ** 6)}*10**6")
 
     GUI.display()

@@ -2,7 +2,8 @@ import math
 import quantities as pq
 from typing import Dict, Tuple, Set, Optional
 
-from utilities import Point, Vector, FACTOR_OF_SAFETY_YIELDING, FACTOR_OF_SAFETY_BUCKLING, YOUNG_MODULUS, YIELD_STRESS
+from utilities import Point, Vector, FACTOR_OF_SAFETY_YIELDING, FACTOR_OF_SAFETY_BUCKLING, YOUNG_MODULUS, YIELD_STRESS, \
+    kN
 
 """Limitations in bridge:
 - One joint cannot have two beams going in the same direction.
@@ -64,13 +65,19 @@ class BeamGroup:
     def __hash__(self):
         return self.key
 
+    def __str__(self):
+        return self.name + " (" + self.color + ")"
+
+    def __repr__(self):
+        return self.__str__()
+
 
 class BeamGroupProperties:
     def __init__(self):
-        self.max_compression = 0
-        self.max_tension = 0
-        self.min_area = 0  # Minimum area of HSS beams such that yielding does not occur
-        self.min_i = 0  # Minimum I of HSS beams such that buckling does not occur (compression only)
+        self.max_compression = 0 * kN
+        self.max_tension = 0 * kN
+        self.min_area = 0 * pq.mm ** 2  # Minimum area of HSS beams such that yielding does not occur
+        self.min_i = 0 * pq.mm ** 4  # Minimum second moment of inertia of beams such that buckling does not occur (compression only)
 
 
 class BeamProperties:
@@ -93,8 +100,9 @@ class BridgeData:
 
 class BridgeFactory:
     def __init__(self):
-        self.hss_chord_set = BeamGroup("Chords", 0, "red")
+        self.hss_top_chord_set = BeamGroup("Top chords", 0, "red")
         self.hss_web_set = BeamGroup("Web", 1, "blue")
+        self.hss_bottom_chord_set = BeamGroup("Bottom chords", 2, "green")
 
     def get_beams_for_equilateral_bridge(self, number_of_panels: int, span):
         beams = {}
@@ -109,13 +117,13 @@ class BridgeFactory:
             top_corner = Point(side_length * (i + 0.5), height)
             right_corner = Point(side_length * (i + 1), 0 * pq.m)
 
-            beams[Beam(left_corner, right_corner)] = BeamProperties(self.hss_chord_set)
+            beams[Beam(left_corner, right_corner)] = BeamProperties(self.hss_bottom_chord_set)
 
             beams[Beam(left_corner, top_corner)] = BeamProperties(self.hss_web_set)
             beams[Beam(right_corner, top_corner)] = BeamProperties(self.hss_web_set)
 
             if previous_top_corner is not None:
-                beams[Beam(previous_top_corner, top_corner)] = BeamProperties(self.hss_chord_set)
+                beams[Beam(previous_top_corner, top_corner)] = BeamProperties(self.hss_top_chord_set)
 
             previous_top_corner = top_corner
 
@@ -141,7 +149,7 @@ class BridgeFactory:
             bottom_left = Point(chord_length * i, 0 * pq.m)
             bottom_right = Point(chord_length * (i + 1), 0 * pq.m)
 
-            beams[Beam(bottom_left, bottom_right)] = BeamProperties(self.hss_chord_set)
+            beams[Beam(bottom_left, bottom_right)] = BeamProperties(self.hss_bottom_chord_set)
 
             if i < number_of_panels / 2:
                 beams[Beam(bottom_left, top_right)] = BeamProperties(self.hss_web_set)
@@ -153,7 +161,7 @@ class BridgeFactory:
             elif i == number_of_panels - 1:
                 pass
             else:
-                beams[Beam(top_left, top_right)] = BeamProperties(self.hss_chord_set)
+                beams[Beam(top_left, top_right)] = BeamProperties(self.hss_top_chord_set)
                 beams[Beam(bottom_right, top_right)] = BeamProperties(self.hss_web_set)
 
         return beams
@@ -212,7 +220,8 @@ class BridgeCalculator:
 
             self.external_forces[
                 Point(x_pos, external_forces_y_pos)] = Vector(0 * pq.N,
-                                                              dist_to_neighbouring_joints / -2 * self.load_per_unit_length)
+                                                              dist_to_neighbouring_joints / -2
+                                                              * self.load_per_unit_length)
 
         for i, x_pos in enumerate(supports_x_pos):
             if i == 0:
@@ -223,7 +232,8 @@ class BridgeCalculator:
                 dist_to_neighbouring_joints = (x_pos - supports_x_pos[i - 1])
 
             self.external_forces[Point(x_pos, external_forces_y_pos)] += Vector(0 * pq.N,
-                                                                                dist_to_neighbouring_joints / 2 * self.load_per_unit_length)
+                                                                                dist_to_neighbouring_joints / 2
+                                                                                * self.load_per_unit_length)
 
     def get_enclosing_rectangle(self):
         if self.enclosing_rectangle is not None:
@@ -296,7 +306,9 @@ class BridgeCalculator:
                             direction_vector) * sum_of_forces.get_magnitude() * -1
                     else:
                         print(
-                            f"Error. Sum of forces ({sum_of_forces}) is not in the same direction as the only unknown beam (dir: {direction_vector}) for joint {joint}.")
+                            f"Error. Sum of forces ({sum_of_forces})"
+                            f" is not in the same direction as the only unknown beam (dir: {direction_vector})"
+                            f" for joint {joint}.")
                     calculated_joints.add(joint)
 
                 elif len(unknown_opposing_joints) == 2:
@@ -339,32 +351,34 @@ class BridgeCalculator:
             passes += 1
 
     def calculate_highest_member_forces(self):
-        for beam, property in self.bridge.beams.items():
+        for beam, beam_property in self.bridge.beams.items():
             current_hss_set = self.bridge.beams[beam].beam_group
             if current_hss_set not in self.beam_groups:
                 self.beam_groups[current_hss_set] = BeamGroupProperties()
 
-            if property.member_force > 0:
+            if beam_property.member_force > 0:
                 self.beam_groups[current_hss_set].max_tension = max(self.beam_groups[current_hss_set].max_tension,
-                                                                    property.member_force)
+                                                                    beam_property.member_force)
 
-            elif property.member_force < 0:
+            elif beam_property.member_force < 0:
                 self.beam_groups[current_hss_set].max_compression = min(
                     self.beam_groups[current_hss_set].max_compression,
-                    property.member_force)
+                    beam_property.member_force)
 
     def calculate_min_area_and_i(self):
-        for hss_property in self.beam_groups.values():
-            hss_property.min_area = max(hss_property.min_area,
-                                        abs(hss_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS
+        for beam_group_property in self.beam_groups.values():
+            beam_group_property.min_area = max(beam_group_property.min_area,
+                                               max(beam_group_property.max_tension, abs(
+                                                   beam_group_property.max_compression)) * FACTOR_OF_SAFETY_YIELDING / YIELD_STRESS)
 
-        for beam, property in self.bridge.beams.items():
-            if property.member_force < 0:
+        for beam, beam_property in self.bridge.beams.items():
+            if beam_property.member_force < 0:
                 current_hss_set = self.bridge.beams[beam].beam_group
 
                 # Compression
-                i = abs(property.member_force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (YOUNG_MODULUS *
-                                                                                         (math.pi ** 2))
+                i = abs(beam_property.member_force) * (beam.get_length() ** 2) * FACTOR_OF_SAFETY_BUCKLING / (
+                        YOUNG_MODULUS *
+                        (math.pi ** 2))
                 self.beam_groups[current_hss_set].min_i = max(self.beam_groups[current_hss_set].min_i, i)
 
     @staticmethod

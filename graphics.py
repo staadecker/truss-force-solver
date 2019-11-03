@@ -45,13 +45,13 @@ class BridgeGUI:
         self.canvas = tkinter.Canvas(self.top, height=float(self.height), width=float(width))
 
     def draw_beams(self, bridge: BridgeCalculator):
-        for beam, property in bridge.bridge.beams.items():
+        for beam, beam_property in bridge.bridge.beams.items():
             self.draw_line(self.scale_point(beam.joint1), self.scale_point(beam.joint2),
-                           color=property.beam_group.color)
-            if property.member_force is not None:
+                           color=beam_property.beam_group.color)
+            if beam_property.member_force is not None:
                 label_position = Vector.from_point(self.scale_point(beam.joint2)) + BridgeGUI.flip_vector_on_y(
                     Vector.from_a_to_b(beam.joint2, beam.joint1)) / 2 * self.scale_factor
-                self.draw_label(label_position, property.member_force.rescale(kN))
+                self.draw_label(label_position, beam_property.member_force.rescale(kN))
 
     def draw_external_forces(self, bridge: BridgeCalculator):
         for joint, force in bridge.external_forces.items():
