@@ -2,6 +2,10 @@
 
 This program calculates the forces present in the truss members of a bridge as shown in the pictures below.
 
+![Howe Truss](res\howe_truss.png)
+
+![K Truss, Point Load](res\k_truss_point_load.png)
+
 ## Running the code
 
 1. Download the code on your laptop.

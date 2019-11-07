@@ -22,15 +22,15 @@ if __name__ == "__main__":
     bridge_factory = BridgeFactory()
 
     # 2. CHANGE THE METHOD TO MATCH YOUR BRIDGE
-    beams = bridge_factory.get_beams_for_howe_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+    beams = bridge_factory.get_beams_for_k_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
 
     bridge = BridgeData(beams)
 
     load_applier = LoadApplier(bridge, SUPPORTS)
 
     # 3. PICK BETWEEN POINT LOAD AND UNIFORMLY DISTRIBUTED LOAD
-    # load_applier.add_point_load(Point(SPAN / 2, 0 * pq.m), 1 * kN)
-    load_applier.add_uniformly_distributed_load(load_per_unit_length=AREA_LOAD * WIDTH / 2)
+    load_applier.add_point_load(Point(SPAN / 2, 0 * pq.m), 1 * kN)
+    #load_applier.add_uniformly_distributed_load(load_per_unit_length=AREA_LOAD * WIDTH / 2)
 
     bridge_calculator = BridgeCalculator(bridge)
     bridge_calculator.calculate_member_forces()

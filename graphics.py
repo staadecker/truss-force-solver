@@ -19,6 +19,7 @@ class BridgeGUI:
 
     def __init__(self):
         self.top = tkinter.Tk()
+        self.top.title("2D Truss Solver")
         self.scale_factor = None
         self.canvas = None
         self.height = None
