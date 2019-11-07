@@ -3,13 +3,16 @@ from utilities import Point, display_float, kN
 import quantities as pq
 from graphics import BridgeGUI
 
+# Follow the 3 steps below to calculate and display the forces in your bridge. Make sure it makes sense.
+
+
 if __name__ == "__main__":
-    # Bridge constants
+    # 1. ADJUST BRIDGE CONSTANTS
     AREA_LOAD = (5 + 1 + 0.75) * kN / pq.m ** 2
-    WIDTH = 3.7 * pq.m
+    WIDTH = 5.4 * pq.m
     SPAN = 107.96 / 3 * pq.m
-    HEIGHT_WIDTH_RATIO = 1
-    NUMBER_OF_PANELS = 8
+    HEIGHT_WIDTH_RATIO = 4 / 3  # Not used for equilateral truss
+    NUMBER_OF_PANELS = 8  # The number of times the pattern repeats in the bridge
 
     SUPPORTS = {
         Point(0 * pq.m, 0 * pq.m),
@@ -18,13 +21,16 @@ if __name__ == "__main__":
 
     bridge_factory = BridgeFactory()
 
-    beams = bridge_factory.get_beams_for_k_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
+    # 2. CHANGE THE METHOD TO MATCH YOUR BRIDGE
+    beams = bridge_factory.get_beams_for_howe_bridge(NUMBER_OF_PANELS, SPAN, HEIGHT_WIDTH_RATIO)
 
     bridge = BridgeData(beams)
 
     load_applier = LoadApplier(bridge, SUPPORTS)
+
+    # 3. PICK BETWEEN POINT LOAD AND UNIFORMLY DISTRIBUTED LOAD
     # load_applier.add_point_load(Point(SPAN / 2, 0 * pq.m), 1 * kN)
-    load_applier.add_uniformly_distributed_load(AREA_LOAD * WIDTH / 2)
+    load_applier.add_uniformly_distributed_load(load_per_unit_length=AREA_LOAD * WIDTH / 2)
 
     bridge_calculator = BridgeCalculator(bridge)
     bridge_calculator.calculate_member_forces()
