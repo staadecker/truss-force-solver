@@ -28,8 +28,7 @@ Point loads must be pointing downwards. Removing this limitation would be the ne
 ## Known Issues
 
 - No unit testing. This is a personal project that I developed for fun rather than reliability.
-Therefore, I decided to not focus on testing. This was a intentional decision.
-Do not expect everything to work perfectly, especially with weird loading cases.
+Therefore, I intentionally decided not to focus on testing. Weird loading cases might not work as expected.
 
 ## License
 
