@@ -32,4 +32,4 @@ Therefore, I intentionally decided not to focus on testing. Weird loading cases 
 
 ## License
 
-This project is licenced under the MIT License. Make sure to cite properly and see `LISENCE` for more details.
+This project is licenced under the MIT License. See `LICENSE` for more details.
